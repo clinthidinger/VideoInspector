@@ -1,7 +1,7 @@
 cmake_minimum_required( VERSION 3.20 FATAL_ERROR )
 set( CMAKE_VERBOSE_MAKEFILE ON )
 
-project( video-player )
+project( video-inspector )
 
 set( VERSION_MAJOR "25" )
 set( VERSION_MINOR "03" )
@@ -22,15 +22,10 @@ set( CMAKE_BUILD_TYPE Debug )
 #set( CMAKE_BUILD_TYPE Release )
 
 get_filename_component( CINDER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../work/Cinder" ABSOLUTE )
-#get_filename_component( APP_PATH "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE )
 get_filename_component( ARG_ASSETS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../assets" ABSOLUTE )
 
 set(cinder_DIR ${CINDER_PATH}/lib/linux/x86_64/ogl/Release)
-# set(cinder_DIR ${CINDER_PATH}/lib/msw/x64/Debug/)
 include( "${CINDER_PATH}/proj/cmake/modules/cinderMakeApp.cmake" )
-
-
-#include(ExternalProject)
 
 
 set(SRC_FILES
@@ -40,8 +35,6 @@ set(SRC_FILES
 	src/graphics/ViewportTransform.h
 	src/graphics/Transform2D.h
 	src/graphics/Transform2D.cpp
-	#src/Utils.h
-	#src/Utils.cpp
 	include/Resources.h
 )
 
@@ -98,8 +91,8 @@ set_property(TARGET AX-MediaPlayer PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$
 
 if( ${BUILD_INSTALLER} )
 	include( InstallRequiredSystemLibraries )
-	set( CPACK_PACKAGE_DESCRIPTION_SUMMARY "Video Player")
-	set( CPACK_PACKAGE_VENDOR "CLint" )
+	set( CPACK_PACKAGE_DESCRIPTION_SUMMARY "Video Inspector")
+	set( CPACK_PACKAGE_VENDOR "Clint" )
 	set( CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../README.md" )
 	#set( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/License.txt" )
 	set( CPACK_PACKAGE_VERSION_MAJOR "0" )
@@ -110,11 +103,11 @@ if( ${BUILD_INSTALLER} )
 		# There is a bug in NSI that does not handle full UNIX paths properly.
 		# Make sure there is at least one set of four backlashes.
 		set( CPACK_PACKAGE_ICON "${CMake_SOURCE_DIR}/Utilities/Release\\\\InstallIcon.bmp")
-		set( CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\nsight-visualizer.exe")
-		set( CPACK_NSIS_DISPLAY_NAME "${CPACK_PACKAGE_INSTALL_DIRECTORY} nsight visualizer")
-		set( CPACK_NSIS_HELP_LINK "http:\\\\\\\\www.s3global.com")
-		set( CPACK_NSIS_URL_INFO_ABOUT "http:\\\\\\\\www.s3global.com")
-		set( CPACK_NSIS_CONTACT "clint@s3global.com" )
+		set( CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\video-inspector.exe")
+		set( CPACK_NSIS_DISPLAY_NAME "${CPACK_PACKAGE_INSTALL_DIRECTORY} video inspector")
+		set( CPACK_NSIS_HELP_LINK "https://github.com/clinthidinger/VideoInspector")
+		set( CPACK_NSIS_URL_INFO_ABOUT "https://github.com/clinthidinger/VideoInspector")
+		set( CPACK_NSIS_CONTACT "clint@somejunk.com" )
 		set( CPACK_NSIS_MODIFY_PATH ON )
 	else()
 		#set(CPACK_STRIP_FILES "${CMAKE_CURRENT_BINARY_DIR}/Debug/${PROJECT_NAME}/${PROJECT_NAME}")
