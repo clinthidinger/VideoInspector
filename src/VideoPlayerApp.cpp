@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <functional>
+#include <queue>
 #include <cinder/app/App.h>
 #include <cinder/app/RendererGl.h>
 #include <cinder/CinderImGui.h>
@@ -56,10 +58,13 @@ private:
     int mSliderFrame{ 0 };
     bool mIsSliding{ false };
     float mRate{ 1.0f };
+    bool mDoesLoop{ false };
+    bool mDoesRepeat{ false };
+    int mLoopStartFrame{ 0 };
+    int mLoopEndFrame{ 0 };
     ViewportTransform mViewportTransform;
     std::chrono::system_clock::time_point mLastMouseDownTime;
-    std::atomic_bool mIsSeeking{ false };
-    //ci::signals::Connection mSeekFinishConn;
+
 #ifndef CINDER_MSW
     std::atomic_bool mIsSeeking{ false };
 #endif
@@ -69,6 +74,8 @@ private:
     ci::signals::Signal<void()> mSignalIsReady;
 #endif
     ci::signals::Signal<void()> mSignalIsSeekFinished;
+
+    std::queue<std::function<void()>> mSeekFinishedActions;
 
     static constexpr int DefaultWindowWidth{ 1280 };
     static constexpr int DefaultWindowHeight{ 720 };
@@ -85,7 +92,6 @@ void VideoPlayerApp::prepareSettings( Settings *settings )
     std::cout << "Mac window content scale: " << app::getWindowContentScale() << "\n";
 #endif
     settings->setWindowSize( DefaultWindowWidth, DefaultWindowHeight );
-    //settings->setFrameRate( 30 );
 }
 
 void VideoPlayerApp::setup()
@@ -123,7 +129,8 @@ void VideoPlayerApp::draw()
         ci::gl::ScopedMatrices scopedMatrices;
         ci::gl::setMatricesWindow( viewportRect.getSize() );
 
-
+        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::setModelMatrix( mViewportTransform.getMatrix() );
 #ifdef CINDER_MSW
         if( !mMovie->isReady() )
         {
@@ -148,10 +155,28 @@ void VideoPlayerApp::draw()
 void VideoPlayerApp::update()
 {   
     updateGui();
-    mFrameNumber = ( mMovie ) ? ( mMovie->getCurrentTime() * mMovie->getFramerate() ) : 0;
-    if( mMovie && !mIsSeeking && ( mFrameNumber == mTotalFrameCount ) )
+    mFrameNumber = ( mMovie ) ? mMovie->getCurrentFrame() : 0;
+    if( mMovie )
     {
-        seekToFrame( 0 );
+        if( mDoesLoop )
+        {
+            if( mFrameNumber >= mLoopEndFrame )
+            {
+                mSeekFinishedActions.push( [this] () {  mMovie->play(); } );
+                seekToFrame( mLoopStartFrame );
+            }
+        }
+        else
+        {
+            if( ( mFrameNumber != 0 ) && ( mFrameNumber >= ( mTotalFrameCount - 1 ) ) )
+            {
+                if( mDoesRepeat )
+                {
+                    mSeekFinishedActions.push( [this] () {  mMovie->play(); } );
+                }
+                seekToFrame( 0 );
+            }
+        }
     }
 }
 
@@ -175,44 +200,43 @@ void VideoPlayerApp::updateGui()
     }
     ImGui::PopItemWidth();
     
+    if( ImGui::Button( "Fit" ) )
+    {
+        resetPanZoom();
+    }
+
     if( ImGui::Button( ( mMovie && mMovie->isPlaying() ) ? "Pause" : "Play" ) )
     {
         if( mMovie )
         {
             if( mMovie->isPlaying() )
             {
-                mMovie->stop();
+                mMovie->pause();
             }
+#ifndef CINDER_MSW
             else if( !mIsSeeking )
+#else 
+            else
+#endif
             {
                 mMovie->play();
             }
         }
     }
     ImGui::Text( "Frame Count: %ld", mTotalFrameCount );
-    //int frameNumber = mFrameNumber;
+    mSliderFrame = mMovie ? mMovie->getCurrentFrame() : 0;
     if( ImGui::SliderInt("TimeLine", &mSliderFrame, 0, mTotalFrameCount ) )
     {
         seekToFrame( mSliderFrame );
         mIsSliding = true;
     }
-    //else if( !mIsSliding )
+#ifndef CINDER_MSW
     if( !mIsSeeking )
     {
         mSliderFrame = mFrameNumber;
     }
-    // ImGui::SameLine();
-    // if( ImGui::Button( "Jump" ) )
-    // {
-    //     if( mMovie )
-    //     {
-    //         spdlog::info( "seeking" );
-    //         mMovie->stop();
-    //         seekToFrame( mSliderFrame );
-    //     }
-    //     mIsSliding = false;
-    //     mSliderFrame = mSliderFrame;
-    // }
+#endif
+
     ImGui::PushItemWidth( ItemWidth * 3.0f );
     ImGui::InputInt( "Frame Number:", &mGotoFrame );
     ImGui::SameLine();
@@ -239,6 +263,41 @@ void VideoPlayerApp::updateGui()
             mMovie->setRate( mRate );
         }
     }
+    if( ImGui::Checkbox( "Repeat", &mDoesRepeat ) )
+    {
+        if( mDoesRepeat )
+        {
+            mDoesLoop = false;
+        }
+    }
+
+    if( ImGui::Checkbox( "Loop", &mDoesLoop ) )
+    {
+        if( mDoesLoop )
+        {
+            mDoesRepeat = false;
+        }
+    }
+
+    ImGui::InputInt( "Start Frame", &mLoopStartFrame );
+    ImGui::SameLine();
+    if( ImGui::Button( "Set##Start" ) )
+    {
+        if( mMovie )
+        {
+            mLoopStartFrame = mMovie->getCurrentFrame();
+        }
+    }
+    ImGui::InputInt( "End Frame", &mLoopEndFrame );
+    ImGui::SameLine();
+    if( ImGui::Button( "Set##End" ) )
+    {
+        if( mMovie )
+        {
+            mLoopEndFrame = mMovie->getCurrentFrame();
+        }
+    }
+    
     ImGui::PopItemWidth();
     ImGui::End();
 }
@@ -366,8 +425,6 @@ void VideoPlayerApp::fit( const ci::Area &area )
     auto scaleScalar = std::min<float>( scale.x, scale.y );
     mViewportTransform.setScale( scaleScalar );
     mViewportTransform.setTranslation( ci::vec2( area.getSize() / 2 ) - ( ci::vec2( size / 2 ) * scaleScalar ) );
-    //mViewportTransform.reposition( ci::vec2( area.getSize() / 2 ) );
-    int hh = 0;
 }
 
 void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
@@ -378,16 +435,13 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
 #else
     mMovie = ci::qtime::MovieGl::create( mMovieFilePath );
 #endif
-    resetPanZoom();
-
-    //mSeekFinishConn = mMovie->getSeekFinishedSignal().connect( [this] () {
-    //    mIsSeeking = false;
-    //} );
+  
     if( mMovie == nullptr )
     {
         //spdlog::error( "Failed to load movie for view {}.", view );
         return;
     }
+    resetPanZoom();
     if( mSeekFinishConn.isConnected() )
     {
         mSeekFinishConn.disconnect();
@@ -397,6 +451,12 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
         mIsSeeking = false;
 #endif
         //std::thread::id id;
+        while( !mSeekFinishedActions.empty() )
+        {
+            mSeekFinishedActions.front()();
+            mSeekFinishedActions.pop();
+        }
+
         mSignalIsSeekFinished.emit();
         //spdlog::info( "Viewport ctx seek finished.  Thread id: {}", -1 );// int( std::this_thread::get_id() ) );
     } );
@@ -411,10 +471,14 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
     }
     mIsReadyConn = mMovie->getIsReadySignal().connect( [this] () {
         resetPanZoom();
+        mTotalFrameCount = mMovie->getFrameCount();
+        mLoopEndFrame = mTotalFrameCount;
         mSignalIsReady.emit();
     } );
 #endif
-    mTotalFrameCount = ( mMovie->getDuration() * mMovie->getFramerate() );
+    mTotalFrameCount = mMovie->getFrameCount();//( mMovie->getDuration() * mMovie->getFramerate() );
+    mLoopStartFrame = 0;
+    mLoopEndFrame = mTotalFrameCount;
 }
 
 void VideoPlayerApp::reset()
@@ -433,40 +497,45 @@ void VideoPlayerApp::reset()
 
 void VideoPlayerApp::prevFrame()
 {
-    if( !mMovie->isPlaying() && !mIsSeeking )
+    if( !mMovie->isPlaying() )
     {
         const int stepFrames = 1;
         auto frame = ci::clamp<int>( std::round( mMovie->getCurrentTime() * mMovie->getFramerate() ) - stepFrames,
                                         0,
                                         std::round( mMovie->getDuration() * mMovie->getFramerate() ) );    
-        spdlog::info( "Seek to frame {}", frame );
         seekToFrame( frame );
     }
 }
 
 void VideoPlayerApp::nextFrame()
 {
-    if( !mMovie->isPlaying() && !mIsSeeking )
+    if( !mMovie->isPlaying() )
     {
-        // const int stepFrames = 1;
-        // auto frame = ci::clamp<int>( std::round( mMovie->getCurrentTime() * mMovie->getFramerate() ) + stepFrames,
-        //                              0,
-        //                              std::round( mMovie->getDuration() * mMovie->getFramerate() ) );    
-        // spdlog::info( "Seek to frame {}", frame );
-        // mIsSeeking = true;
-        // mMovie->seekToFrame( frame );
-        mMovie->stepForward(); // Note: does not cause a seek.
+#ifndef CINDER_MSW
+        if( !mIsSeeking )
+        {
+#endif
+            mMovie->stepForward(); // Note: does not cause a seek.
+#ifndef CINDER_MSW
+        }
+#endif
     }
 }
 
 void VideoPlayerApp::seekToFrame( int64_t frameNumber )
 {
-    if( mMovie && !mIsSeeking )
+    if( mMovie )
     {
 #ifndef CINDER_MSW
-        mIsSeeking = true;
+        if( !mIsSeeking )
+        {
+            mIsSeeking = true;
 #endif
-        mMovie->seekToFrame( frameNumber );
+            spdlog::info( "Seek to frame {}", frameNumber );
+            mMovie->seekToFrame( frameNumber );
+#ifndef CINDER_MSW
+        }
+#endif
     }
 
 }
