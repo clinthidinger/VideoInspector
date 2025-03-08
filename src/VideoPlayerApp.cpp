@@ -20,9 +20,12 @@ using MovieRef = ci::qtime::MovieGlRef;
 using MovieRef = AxMovieRef;
 #endif
 #endif
-#include <spdlog/spdlog.h>
 #include "graphics/ViewportTransform.h"
 
+// TODO:
+// Buttons
+// Energy saver
+// Move list
 
 class VideoPlayerApp : public ci::app::App
 {
@@ -242,7 +245,7 @@ void VideoPlayerApp::updateGui()
     ImGui::SameLine();
     if( ImGui::Button( "Go To" ) )
     {
-        spdlog::info( "Seek to frame {}", mGotoFrame );
+        CI_LOG_I( "Seek to frame " + std::to_string( mGotoFrame ) );
         mMovie->stop();
         seekToFrame( mGotoFrame );
     }
@@ -438,7 +441,7 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
   
     if( mMovie == nullptr )
     {
-        //spdlog::error( "Failed to load movie for view {}.", view );
+        CI_LOG_E( "Failed to load movie." );
         return;
     }
     resetPanZoom();
@@ -450,7 +453,6 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
 #ifndef CINDER_MSW
         mIsSeeking = false;
 #endif
-        //std::thread::id id;
         while( !mSeekFinishedActions.empty() )
         {
             mSeekFinishedActions.front()();
@@ -458,7 +460,6 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
         }
 
         mSignalIsSeekFinished.emit();
-        //spdlog::info( "Viewport ctx seek finished.  Thread id: {}", -1 );// int( std::this_thread::get_id() ) );
     } );
 #ifdef CINDER_MSW
     if( mMovie->isReady() )
@@ -476,7 +477,7 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
         mSignalIsReady.emit();
     } );
 #endif
-    mTotalFrameCount = mMovie->getFrameCount();//( mMovie->getDuration() * mMovie->getFramerate() );
+    mTotalFrameCount = mMovie->getFrameCount();
     mLoopStartFrame = 0;
     mLoopEndFrame = mTotalFrameCount;
 }
@@ -531,7 +532,7 @@ void VideoPlayerApp::seekToFrame( int64_t frameNumber )
         {
             mIsSeeking = true;
 #endif
-            spdlog::info( "Seek to frame {}", frameNumber );
+            CI_LOG_I( "Seek to frame " + std::to_string( frameNumber ) );
             mMovie->seekToFrame( frameNumber );
 #ifndef CINDER_MSW
         }
