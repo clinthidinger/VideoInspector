@@ -1,8 +1,10 @@
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <queue>
 #include <cinder/app/App.h>
 #include <cinder/app/RendererGl.h>
+#include <cinder/Capture.h>
 #include <cinder/CinderImGui.h>
 #include <cinder/gl/gl.h>
 #include <cinder/Log.h>
@@ -22,10 +24,29 @@ using MovieRef = AxMovieRef;
 #endif
 #include "graphics/ViewportTransform.h"
 
+
+#ifdef CINDER_MSW
+
+#include <windows.h>
+#include <shobjidl.h>   // For IShellItem
+#include <shlwapi.h>
+#include <shlobj.h>     // For SHCreateItemFromParsingName
+#include <comdef.h>
+#include <iostream>
+
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "ole32.lib")
+
+#endif 
+
 // TODO:
 // Buttons
 // Energy saver
 // Move list
+// file drop
+// camera feed and multi-viewport.  three transforms.
+// brightness/contrast?
+// gallery view
 
 class VideoPlayerApp : public ci::app::App
 {
@@ -39,21 +60,35 @@ public:
     void mouseWheel( ci::app::MouseEvent event ) override;
     void mouseDown( ci::app::MouseEvent event ) override;
     void mouseDrag( ci::app::MouseEvent event ) override;
-
+    void mouseUp( ci::app::MouseEvent event ) override;
+    void fileDrop( ci::app::FileDropEvent event ) override;
+    
 private:
     void updateGui();
     void addZoom( float wheelIncrements );
     void resetPanZoom();
     bool isZoomed() const;
     bool isTransformedAreaOverThresh( float thresh ) const;
+    void fit();
     void fit( const ci::Area &area );
     void loadMovie( const std::string &movieFilePath );
+    void loadMovie( int index );
     void prevFrame();
     void nextFrame();
     void seekToFrame( int64_t frameNumber );
     void reset();
+    bool loadMoviesInDir();
+    void setupCapture();
+    bool isInCameraFrame( const ci::ivec2 &pos ) const;
+    bool isInVideoFrame( const ci::ivec2 &pos ) const;
 
-    std::string mMovieFilePath;
+    void makeThumbnails( const std::string &dir );
+
+    enum class FileMode { File, Directory };
+    FileMode mFileMode{ FileMode::File };
+    std::string mPath;
+    std::vector<std::string> mVideoFilePaths;
+    int mSelectedVideoIndex{ -1 };
     MovieRef mMovie;
     int64_t mFrameNumber{ 0 };
     int64_t mTotalFrameCount{ 0 };
@@ -65,8 +100,17 @@ private:
     bool mDoesRepeat{ false };
     int mLoopStartFrame{ 0 };
     int mLoopEndFrame{ 0 };
+    bool mEnableCamera{ false };
     ViewportTransform mViewportTransform;
+    ViewportTransform mCamFrameTransform;
+    bool mWasMouseDownInCamFrame{ false };
     std::chrono::system_clock::time_point mLastMouseDownTime;
+
+    ci::CaptureRef mCapture;
+    ci::gl::TextureRef mCamFrameTex;
+    int mCameraDeviceCount{ 0 };
+    
+    std::future<void()> mThumbnailFut;
 
 #ifndef CINDER_MSW
     std::atomic_bool mIsSeeking{ false };
@@ -105,8 +149,8 @@ void VideoPlayerApp::setup()
     auto args = getCommandLineArgs();
     if( args.size() > 1 )
     {
-        mMovieFilePath = args[1];
-        loadMovie( mMovieFilePath );
+        mVideoFilePaths = { args[1] };
+        loadMovie( mVideoFilePaths.front() );
         if( mMovie && ( args.size() > 2 ) )
         {
             int jumpFrame = std::stoi( args[2] );
@@ -117,13 +161,26 @@ void VideoPlayerApp::setup()
             seekToFrame( jumpFrame );
         }
     }
+    mCameraDeviceCount = ci::Capture::getDevices().size();
 }
 
 void VideoPlayerApp::draw()
 {
     ci::gl::clear();
     
-    ci::gl::ScopedMatrices scopedMatrices;
+    if( mEnableCamera && mCamFrameTex )
+    {
+        const auto viewportRect = ci::app::getWindowBounds();
+        ci::vec2 lowerLeftOrigin( viewportRect.x1, ci::app::getWindowHeight() - viewportRect.y2 );
+        ci::gl::ScopedViewport scopedViewport( lowerLeftOrigin, viewportRect.getSize() );
+        ci::gl::ScopedMatrices scopedMatrices;
+        ci::gl::setMatricesWindow( viewportRect.getSize() );
+
+        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::setModelMatrix( mCamFrameTransform.getMatrix() );
+        ci::gl::draw( mCamFrameTex );
+    }
+
     if( mMovie )
     {
         const auto viewportRect = ci::app::getWindowBounds();
@@ -153,6 +210,7 @@ void VideoPlayerApp::draw()
         }
 #endif
     }
+    
 }
 
 void VideoPlayerApp::update()
@@ -181,6 +239,18 @@ void VideoPlayerApp::update()
             }
         }
     }
+
+    if( mEnableCamera )
+    {
+        if( mCapture == nullptr )
+        {
+            setupCapture();
+        }
+        if( mCapture && mCapture->checkNewFrame() ) 
+        {
+            mCamFrameTex = ci::gl::Texture::create( *mCapture->getSurface() );
+        }
+    }
 }
 
 void VideoPlayerApp::updateGui()
@@ -189,8 +259,9 @@ void VideoPlayerApp::updateGui()
     ImGui::Begin( "App Parameters " );
     ImGui::Text( "fps: %f", ci::app::App::getAverageFps() );
     ImGui::Text( "Frame: %ld", mFrameNumber );
-    ImGui::PushItemWidth( ItemWidth );
-    ImGui::Text( "%s", mMovieFilePath.c_str()  );
+   
+    //ImGui::PushItemWidth( ItemWidth );
+  /*  ImGui::Text( "%s", mMovieFilePath.c_str()  );
     ImGui::SameLine();
     if( ImGui::Button( "..." ) )
     {
@@ -200,8 +271,79 @@ void VideoPlayerApp::updateGui()
             mMovieFilePath = std::string( path.string().c_str() );
             loadMovie( mMovieFilePath );
         }
+    }*/
+    ImGui::Text( "File Mode: " );
+    ImGui::SameLine();
+    if( ImGui::RadioButton( "File", mFileMode == FileMode::File ) )
+    {
+        mFileMode = FileMode::File;
     }
-    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    if( ImGui::RadioButton( "Directory", mFileMode == FileMode::Directory ) )
+    {
+        mFileMode = FileMode::Directory;
+    }
+
+    auto constexpr textFlags = ImGuiInputTextFlags_None | ImGuiInputTextFlags_ReadOnly;
+    ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x - ( ImGui::GetFontSize() * 2.0f ) );
+    ImGui::InputText( "##FilePath", const_cast<char *>( mPath.c_str() ), mPath.size(), textFlags );
+    if( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+    {
+        if( !mPath.empty() )
+        {
+            ImGui::SetTooltip( mPath.data() );
+        }
+        else
+        {
+            ImGui::SetTooltip( "Click ... to load your image." );
+        }
+    }
+    ImGui::SameLine();
+    if( ImGui::Button( "Browse..." ) )
+    {
+        if( mFileMode == FileMode::File )
+        {
+            auto const path = getOpenFilePath( mPath );
+            if( !path.string().empty() )
+            {
+                mPath = std::string( path.string().c_str() );
+                mVideoFilePaths = { mPath };
+                mSelectedVideoIndex = -1;
+                loadMovie( mPath );
+                resetPanZoom();
+            }
+        }
+        else
+        {
+            auto const path = getFolderPath();
+            if( !path.string().empty() )
+            {
+                mPath = std::string( path.string().c_str() );
+                if( loadMoviesInDir() )
+                {
+                    loadMovie( 0 );
+                }
+                //loadMovie( mMovieFilePath );
+            }
+        }
+    }
+
+    if( mFileMode == FileMode::Directory )
+    {
+        ImGui::Text( "Video files [%d]", mVideoFilePaths.size() );
+
+        // List box with all video files
+        ImGui::BeginChild( "VideoListBox", ImVec2( 0, ImGui::GetFontSize() * 7 ), true );
+        for( int i = 0; i < mVideoFilePaths.size(); i++ ) 
+        {
+            if( ImGui::Selectable( mVideoFilePaths[i].c_str(), mSelectedVideoIndex == i ) )
+            {
+                loadMovie( i );
+            }
+        }
+        ImGui::EndChild();
+    }
+    //ImGui::PopItemWidth();
     
     if( ImGui::Button( "Fit" ) )
     {
@@ -258,12 +400,14 @@ void VideoPlayerApp::updateGui()
     {
         nextFrame();
     }
-    if( ImGui::InputFloat( "Rate", &mRate, 0.1f ) )
+    if( ImGui::InputFloat( "Rate", &mRate, 0.05f, 0.1f, 2 ) )
     {
-        mRate = ci::clamp( mRate, 0.1f, 2.0f );
+        mRate = ci::clamp( mRate, 0.05f, 2.0f );
         if( mMovie )
         {
             mMovie->setRate( mRate );
+            auto aa = mMovie->getRate();
+            int gg = 0;
         }
     }
     if( ImGui::Checkbox( "Repeat", &mDoesRepeat ) )
@@ -302,6 +446,11 @@ void VideoPlayerApp::updateGui()
     }
     
     ImGui::PopItemWidth();
+    if( mCameraDeviceCount != 0 )
+    {
+        ImGui::Checkbox( "Enable Camera", &mEnableCamera );
+    }
+
     ImGui::End();
 }
 
@@ -341,6 +490,14 @@ void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
             nextFrame();
             break;
         }
+        case ci::app::KeyEvent::KEY_UP:
+        {
+            loadMovie( std::clamp<int>( mSelectedVideoIndex - 1, 0, mVideoFilePaths.size() - 1 ) );
+        }
+        case ci::app::KeyEvent::KEY_DOWN:
+        {
+            loadMovie( std::clamp<int>( mSelectedVideoIndex + 1, 0, mVideoFilePaths.size() - 1 ) );
+        }
         default:
         {
             break;
@@ -357,19 +514,50 @@ void VideoPlayerApp::mouseDown( ci::app::MouseEvent event )
     {
         resetPanZoom();
     }
+
+    const ci::ivec2 &pos = event.getPos();
+    if( isInCameraFrame( pos ) && !isInVideoFrame( pos ) )
+    {
+        mCamFrameTransform.mouseDown( pos );
+        mWasMouseDownInCamFrame = true;
+        return;
+    }
     
-    mViewportTransform.mouseDown( event.getPos() );
+    mViewportTransform.mouseDown( pos );
     mLastMouseDownTime = currTime;
 }
 
 void VideoPlayerApp::mouseDrag( ci::app::MouseEvent event )
 {
-    mViewportTransform.mouseDrag( event.getPos() );
+    const ci::ivec2 &pos = event.getPos();
+    if( isInCameraFrame( pos ) && ( mWasMouseDownInCamFrame || !isInVideoFrame( pos ) ) )
+    {
+        mCamFrameTransform.mouseDrag( pos );
+        return;
+    }
+    mViewportTransform.mouseDrag( pos );
+}
+
+void VideoPlayerApp::mouseUp( ci::app::MouseEvent event )
+{
+    mWasMouseDownInCamFrame = false;
 }
 
 void VideoPlayerApp::mouseWheel( ci::app::MouseEvent event )
 {
-    mViewportTransform.mouseWheel( event.getPos(), event.getWheelIncrement() );
+    const ci::ivec2 &pos = event.getPos();
+    if( isInCameraFrame( pos ) && !isInVideoFrame( pos ) )
+    {
+        mCamFrameTransform.mouseWheel( pos, event.getWheelIncrement() );
+        return;
+    }
+
+    mViewportTransform.mouseWheel( pos, event.getWheelIncrement() );
+}
+
+void VideoPlayerApp::fileDrop( ci::app::FileDropEvent event )
+{
+    loadMovie( event.getFile( 0 ).string() );
 }
 
 void VideoPlayerApp::addZoom( float wheelIncrements )
@@ -408,6 +596,11 @@ bool VideoPlayerApp::isZoomed() const
 void VideoPlayerApp::resetPanZoom()
 {
     mViewportTransform.reset();
+    fit();
+}
+
+void VideoPlayerApp::fit()
+{
     fit( ci::app::getWindowBounds() );
 }
 
@@ -430,13 +623,23 @@ void VideoPlayerApp::fit( const ci::Area &area )
     mViewportTransform.setTranslation( ci::vec2( area.getSize() / 2 ) - ( ci::vec2( size / 2 ) * scaleScalar ) );
 }
 
+void VideoPlayerApp::loadMovie( int index )
+{
+    if( !mVideoFilePaths.empty() )
+    {
+        mSelectedVideoIndex = std::clamp<int>( index, 0, mVideoFilePaths.size() - 1 );
+        loadMovie( mPath + "/" + mVideoFilePaths[mSelectedVideoIndex] );
+        resetPanZoom();
+    }
+}
+
 void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
 {
-    mMovieFilePath = movieFilePath;
+    //mMovieFilePath = movieFilePath;
 #ifdef CINDER_MSW
-    mMovie = AxMovie::create( mMovieFilePath );
+    mMovie = AxMovie::create( movieFilePath );
 #else
-    mMovie = ci::qtime::MovieGl::create( mMovieFilePath );
+    mMovie = ci::qtime::MovieGl::create( movieFilePath );
 #endif
   
     if( mMovie == nullptr )
@@ -480,6 +683,7 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
     mTotalFrameCount = mMovie->getFrameCount();
     mLoopStartFrame = 0;
     mLoopEndFrame = mTotalFrameCount;
+    mMovie->setRate( mRate );
 }
 
 void VideoPlayerApp::reset()
@@ -541,4 +745,438 @@ void VideoPlayerApp::seekToFrame( int64_t frameNumber )
 
 }
 
+bool VideoPlayerApp::loadMoviesInDir()
+{
+    mVideoFilePaths.clear();
+    mSelectedVideoIndex = -1;
+
+    static const std::vector<std::string> VideoExtensions =
+    {
+        ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".3gp"
+    };
+
+    try 
+    {
+        for( const auto &entry : std::filesystem::directory_iterator( mPath ) ) 
+        {
+            if( entry.is_regular_file() ) 
+            {
+                std::string extension = entry.path().extension().string();
+                // Convert extension to lowercase for case-insensitive comparison
+                std::transform( extension.begin(), extension.end(), extension.begin(),
+                    [] ( unsigned char c ) { return std::tolower( c ); } );
+
+                if( std::find( VideoExtensions.begin(), VideoExtensions.end(), extension ) != VideoExtensions.end() ) 
+                {
+                    mVideoFilePaths.push_back( entry.path().filename().string() );
+                }
+            }
+        }
+
+        // Sort video files alphabetically
+        std::sort( mVideoFilePaths.begin(), mVideoFilePaths.end() );
+    }
+    catch( const std::filesystem::filesystem_error &e ) 
+    {
+        std::cerr << "Error accessing directory: " << e.what() << std::endl;
+    }
+
+    return !mVideoFilePaths.empty();
+}
+
+void VideoPlayerApp::setupCapture()
+{
+    if( ci::Capture::getDevices().empty() )
+    {
+        return;
+    }
+
+    try 
+    {
+        mCapture = ci::Capture::create( 640, 480 );
+        mCapture->start();
+    }
+    catch( const ci::CaptureExc &e ) 
+    {
+        ci::app::console() << "Error opening camera: " << e.what() << std::endl;
+    }
+}
+
+bool VideoPlayerApp::isInCameraFrame( const ci::ivec2 &pos ) const
+{
+    if( mCapture == nullptr )
+    {
+        return false;
+    }
+    auto const area = mCapture->getBounds();
+    auto const &mtx = mCamFrameTransform.getMatrix();
+    const ci::Area transformedArea(
+        mtx * ci::vec4( area.getUL(), 0.0f, 1.0f ),
+        mtx * ci::vec4( area.getLR(), 0.0f, 1.0f )
+    );
+
+    return ( transformedArea.contains( pos ) );
+}
+
+bool VideoPlayerApp::isInVideoFrame( const ci::ivec2 &pos ) const
+{
+    if( mMovie == nullptr )
+    {
+        return false;
+    }
+
+    auto const size = mMovie->getSize();
+    auto const &mtx = mViewportTransform.getMatrix();
+    const ci::Area transformedArea(
+        mtx * ci::vec4( 0.0f, 0.0f, 0.0f, 1.0f ),
+        mtx * ci::vec4( size, 0.0f, 1.0f )
+    );
+
+    return ( transformedArea.contains( pos ) );
+}
+
+
+
+
+void VideoPlayerApp::makeThumbnails( const std::string &dir )
+{
+    CoInitialize( nullptr );
+
+    const std::vector<std::string> videoFilePaths = mVideoFilePaths;
+    mThumbnailFut = std::async( [videoFilePaths] () {
+
+        for( auto const videoPath : videoFilePaths )
+        {
+            LPCWSTR videoPath = L"C:\\Path\\To\\Your\\Video.mp4";
+
+            IShellItem *pShellItem = nullptr;
+            HRESULT hr = SHCreateItemFromParsingName( videoPath, nullptr, IID_PPV_ARGS( &pShellItem ) );
+            if( SUCCEEDED( hr ) )
+            {
+                IShellItemImageFactory *pImageFactory = nullptr;
+                hr = pShellItem->QueryInterface( IID_PPV_ARGS( &pImageFactory ) );
+                if( SUCCEEDED( hr ) )
+                {
+                    SIZE size = { 256, 256 }; // Thumbnail size
+                    HBITMAP hBitmap = nullptr;
+                    hr = pImageFactory->GetImage( size, SIIGBF_BIGGERSIZEOK | SIIGBF_THUMBNAILONLY, &hBitmap );
+                    if( SUCCEEDED( hr ) )
+                    {
+                        // You now have an HBITMAP with the thumbnail. You can save it or display it.
+                        std::cout << "Thumbnail successfully retrieved." << std::endl;
+                        saveHBitmapAsPng( hBitmap );
+                        // Clean up
+                        DeleteObject( hBitmap );
+                    }
+                    else
+                    {
+                        std::cerr << "GetImage failed: " << std::hex << hr << std::endl;
+                    }
+                    pImageFactory->Release();
+                }
+                pShellItem->Release();
+            }
+        }
+        CoUninitialize();
+    } );
+}
+
+bool saveHBitmapAsPng( HBITMAP hBitmap, const std::string &outputPath ) 
+{
+    BITMAP bmp = {};
+    GetObject( hBitmap, sizeof( BITMAP ), &bmp );
+
+    BITMAPINFOHEADER bi = {};
+    bi.biSize = sizeof( BITMAPINFOHEADER );
+    bi.biWidth = bmp.bmWidth;
+    bi.biHeight = -bmp.bmHeight; // top-down
+    bi.biPlanes = 1;
+    bi.biBitCount = 32;
+    bi.biCompression = BI_RGB;
+
+    int dataSize = bmp.bmWidth * bmp.bmHeight * 4;
+    std::vector<uint8_t> pixels( dataSize );
+
+    HDC hDC = GetDC( nullptr );
+    GetDIBits( hDC, hBitmap, 0, bmp.bmHeight, pixels.data(), reinterpret_cast< BITMAPINFO * >( &bi ), DIB_RGB_COLORS );
+    ReleaseDC( nullptr, hDC );
+
+    // Save with Cinder (if you're using it)
+    ci::Surface8u surface( pixels.data(), bmp.bmWidth, bmp.bmHeight, bmp.bmWidth * 4, ci::SurfaceChannelOrder::BGRA );
+    ci::writeImage( outputPath, surface );
+
+    return true;
+}
+
+
+
 CINDER_APP( VideoPlayerApp, ci::app::RendererGl( ci::app::RendererGl::Options() ), VideoPlayerApp::prepareSettings );
+
+
+
+
+
+/*
+
+// Define common video file extensions
+const std::vector<std::string> VideoExtensions = 
+{
+    ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".3gp"
+};
+
+ void refreshVideoFiles() {
+        videoFiles.clear();
+        selectedIndex = -1;
+
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(currentDirectory)) {
+                if (entry.is_regular_file()) {
+                    std::string extension = entry.path().extension().string();
+                    // Convert extension to lowercase for case-insensitive comparison
+                    std::transform(extension.begin(), extension.end(), extension.begin(),
+                        [](unsigned char c) { return std::tolower(c); });
+
+                    if (std::find(VideoExtensions.begin(), VideoExtensions.end(), extension) != VideoExtensions.end()) {
+                        videoFiles.push_back(entry.path().filename().string());
+                    }
+                }
+            }
+
+            // Sort video files alphabetically
+            std::sort(videoFiles.begin(), videoFiles.end());
+        }
+        catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "Error accessing directory: " << e.what() << std::endl;
+        }
+    }
+
+    void renderImGuiListBox() {
+        // Display current directory
+        ImGui::Text("Current Directory: %s", currentDirectory.c_str());
+
+        // Button to refresh the file list
+        if (ImGui::Button("Refresh")) {
+            refreshVideoFiles();
+        }
+
+        ImGui::SameLine();
+
+        // Button to go up one directory
+        if (ImGui::Button("Up One Level")) {
+            std::filesystem::path currentPath(currentDirectory);
+            if (currentPath.has_parent_path()) {
+                setDirectory(currentPath.parent_path().string());
+            }
+        }
+
+        // Display number of video files found
+        ImGui::Text("Found %zu video files", videoFiles.size());
+
+        // List box with all video files
+        ImGui::BeginChild("VideoListBox", ImVec2(0, 300), true);
+        for (int i = 0; i < videoFiles.size(); i++) {
+            if (ImGui::Selectable(videoFiles[i].c_str(), selectedIndex == i)) {
+                selectedIndex = i;
+            }
+        }
+        ImGui::EndChild();
+
+        // Show selected file info
+        if (selectedIndex >= 0 && selectedIndex < videoFiles.size()) {
+            ImGui::Text("Selected: %s", videoFiles[selectedIndex].c_str());
+
+            std::filesystem::path fullPath = std::filesystem::path(currentDirectory) / videoFiles[selectedIndex];
+            auto fileSize = std::filesystem::file_size(fullPath);
+
+            // Convert file size to appropriate unit
+            const char* units[] = {"B", "KB", "MB", "GB"};
+            int unitIndex = 0;
+            double size = static_cast<double>(fileSize);
+
+            while (size > 1024 && unitIndex < 3) {
+                size /= 1024;
+                unitIndex++;
+            }
+
+            ImGui::Text("Size: %.2f %s", size, units[unitIndex]);
+
+            // Add buttons for actions
+            if (ImGui::Button("Open")) {
+                // Add your code to open the video file
+                std::cout << "Opening: " << fullPath.string() << std::endl;
+            }
+        }
+    }
+
+    std::string getSelectedFilePath() const {
+        if (selectedIndex >= 0 && selectedIndex < videoFiles.size()) {
+            return (std::filesystem::path(currentDirectory) / videoFiles[selectedIndex]).string();
+        }
+        return "";
+    }
+};
+
+
+class VideoPreviewerApp : public App {
+public:
+    void setup() override;
+    void update() override;
+    void draw() override;
+    void fileDrop(FileDropEvent event) override;
+    void loadVideosFromFolder(const fs::path& path);
+
+private:
+    struct VideoItem {
+        fs::path                     path;
+        qtime::MovieGlRef            movie;
+        gl::TextureRef               texture;
+        Rectf                        rect;
+        bool                         isPlaying = false;
+        bool                         isHovered = false;
+    };
+
+    vector<VideoItem>                mVideos;
+    const float                      THUMBNAIL_SIZE = 160.0f;
+    const float                      THUMBNAIL_SPACING = 20.0f;
+    const int                        THUMBNAILS_PER_ROW = 4;
+    const vec2                       THUMBNAIL_DIMS = vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE * 9.0f / 16.0f); // 16:9 aspect ratio
+};
+
+void VideoPreviewerApp::setup() {
+    setWindowSize(800, 600);
+
+    // Default directory to search if none provided
+    fs::path defaultPath = getHomeDirectory() / "Videos";
+    if (fs::exists(defaultPath) && fs::is_directory(defaultPath)) {
+        loadVideosFromFolder(defaultPath);
+    }
+
+    // Instructions
+    console() << "Drag and drop a folder containing video files to load them." << endl;
+}
+
+void VideoPreviewerApp::loadVideosFromFolder(const fs::path& folderPath) {
+    mVideos.clear();
+
+    try {
+        for (const auto& entry : fs::directory_iterator(folderPath)) {
+            if (!fs::is_regular_file(entry.path())) continue;
+
+            // Check if the file has a video extension
+            string ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+            if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".m4v" || ext == ".mkv") {
+                try {
+                    VideoItem item;
+                    item.path = entry.path();
+
+                    // Load the movie
+                    qtime::MovieGl::Format format;
+                    format.setPlayRate(1.0f);
+                    item.movie = qtime::MovieGl::create(entry.path(), format);
+
+                    // Get the first frame as texture
+                    item.movie->seekToStart();
+                    item.movie->stop();
+                    if (item.movie->checkNewFrame()) {
+                        item.texture = gl::Texture::create(item.movie->getTexture());
+                    }
+
+                    mVideos.push_back(item);
+                }
+                catch (const std::exception& e) {
+                    console() << "Error loading video " << entry.path() << ": " << e.what() << endl;
+                }
+            }
+        }
+
+        // Calculate rectangles for each video
+        for (size_t i = 0; i < mVideos.size(); i++) {
+            int row = i / THUMBNAILS_PER_ROW;
+            int col = i % THUMBNAILS_PER_ROW;
+
+            float x = THUMBNAIL_SPACING + col * (THUMBNAIL_DIMS.x + THUMBNAIL_SPACING);
+            float y = THUMBNAIL_SPACING + row * (THUMBNAIL_DIMS.y + THUMBNAIL_SPACING);
+
+            mVideos[i].rect = Rectf(x, y, x + THUMBNAIL_DIMS.x, y + THUMBNAIL_DIMS.y);
+        }
+
+        console() << "Loaded " << mVideos.size() << " videos from " << folderPath << endl;
+    }
+    catch (const std::exception& e) {
+        console() << "Error loading from directory: " << e.what() << endl;
+    }
+}
+
+void VideoPreviewerApp::fileDrop(FileDropEvent event) {
+    if (event.getNumFiles() >= 1) {
+        const fs::path& path = event.getFile(0);
+        if (fs::is_directory(path)) {
+            loadVideosFromFolder(path);
+        }
+    }
+}
+
+void VideoPreviewerApp::update() {
+    vec2 mousePos = getMousePos();
+
+    for (auto& video : mVideos) {
+        bool wasHovered = video.isHovered;
+        video.isHovered = video.rect.contains(mousePos);
+
+        // Handle hover state changes
+        if (video.isHovered && !wasHovered) {
+            // Mouse entered - start playing
+            video.movie->play();
+            video.isPlaying = true;
+        }
+        else if (!video.isHovered && wasHovered) {
+            // Mouse exited - pause and reset to start
+            video.movie->stop();
+            video.movie->seekToStart();
+            video.isPlaying = false;
+        }
+
+        // Update texture if playing
+        if (video.isPlaying && video.movie->checkNewFrame()) {
+            video.texture = gl::Texture::create(video.movie->getTexture());
+        }
+    }
+}
+
+void VideoPreviewerApp::draw() {
+    gl::clear(Color(0.2f, 0.2f, 0.2f));
+
+    // Draw videos
+    for (const auto& video : mVideos) {
+        if (video.texture) {
+            gl::color(Color::white());
+            gl::draw(video.texture, video.rect);
+
+            // Draw border for hovered videos
+            if (video.isHovered) {
+                gl::color(Color(1.0f, 0.5f, 0.0f));
+                gl::drawStrokedRect(video.rect, 2.0f);
+            }
+
+            // Draw filename below thumbnail
+            gl::color(Color::white());
+            gl::drawString(video.path.filename().string(),
+                           vec2(video.rect.x1, video.rect.y2 + 5),
+                           Color::white(), Font("Arial", 12));
+        }
+    }
+
+    // Draw instructions if no videos are loaded
+    if (mVideos.empty()) {
+        gl::drawStringCentered("Drag and drop a folder containing video files",
+                              getWindowCenter(),
+                              Color::white(),
+                              Font("Arial", 20));
+    }
+}
+
+CINDER_APP(VideoPreviewerApp, RendererGl)
+
+*/
