@@ -1,0 +1,39 @@
+// manifest.json - Updated with keyboard shortcuts and context menu
+{
+  "manifest_version": 3,
+  "name": "URL Logger for Brave",
+  "version": "1.0",
+  "description": "Appends the current URL to a text file using hotkeys or context menu",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "downloads",
+    "contextMenus"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "log-current-url": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Log current URL to file"
+    },
+    "download-url-log": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Download URL log file"
+    }
+  },
+  "action": {
+    "default_title": "Click Me",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
+}

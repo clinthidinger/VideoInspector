@@ -1,0 +1,8 @@
+To view console logs from Brave extensions, navigate to brave://extensions/, enable developer mode, and then click on the service worker (ManifestV3) or background page (ManifestV2) to open its DevTools console. 
+
+
+Go to brave://extensions/
+Enable "Developer mode"
+Click "Load unpacked" and select your extension directory
+
+Press the keyboard shortcut Ctrl+Shift+L (or Command+Shift+L on Mac)

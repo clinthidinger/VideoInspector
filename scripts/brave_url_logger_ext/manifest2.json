@@ -1,0 +1,18 @@
+{
+    "manifest_version": 3,
+    "name": "URL Logger",
+    "version": "1.0",
+    "description": "URL Logger.",
+    "permissions": ["storage"],
+    "host_permissions": ["<all_urls>"],
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["brave-url-logger.js"]
+      }
+    ],
+    "background": {
+    "service_worker": "background.js"
+  },
+  }
+  
