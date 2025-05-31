@@ -9,6 +9,7 @@
 #include <cinder/gl/gl.h>
 #include <cinder/Log.h>
 #include <cinder/Utilities.h>
+#include <imgui/imgui_internal.h>
 //#include <ci_nanovg_gl.hpp>
 #ifdef CINDER_LINUX
 #ifdef linux
@@ -22,6 +23,8 @@ using MovieRef = ci::qtime::MovieGlRef;
 using MovieRef = AxMovieRef;
 #endif
 #endif
+#include "fonts/RobotoRegular.h"
+#include "fonts/FontAwesome-tweak.h"
 #include "graphics/ViewportTransform.h"
 
 
@@ -54,6 +57,7 @@ public:
     static void prepareSettings( Settings *settings );
 
     void setup() override;
+    void setupIcon();
     void draw() override;
     void update() override;
     void keyDown( ci::app::KeyEvent event ) override;
@@ -73,6 +77,8 @@ private:
     void fit( const ci::Area &area );
     void loadMovie( const std::string &movieFilePath );
     void loadMovie( int index );
+    void prevVideo();
+    void nextVideo();
     void prevFrame();
     void nextFrame();
     void seekToFrame( int64_t frameNumber );
@@ -110,7 +116,7 @@ private:
     ci::gl::TextureRef mCamFrameTex;
     int mCameraDeviceCount{ 0 };
     
-    std::future<void()> mThumbnailFut;
+    std::future<void> mThumbnailFut;
 
 #ifndef CINDER_MSW
     std::atomic_bool mIsSeeking{ false };
@@ -123,6 +129,11 @@ private:
     ci::signals::Signal<void()> mSignalIsSeekFinished;
 
     std::queue<std::function<void()>> mSeekFinishedActions;
+
+    ImFont *mFont{ nullptr };
+    ImFont *mFontAwesomeTweaked{ nullptr };
+    static constexpr const int DefaultFontSize{ 16 };
+    int mFontSize{ DefaultFontSize };
 
     static constexpr int DefaultWindowWidth{ 1280 };
     static constexpr int DefaultWindowHeight{ 720 };
@@ -143,6 +154,9 @@ void VideoPlayerApp::prepareSettings( Settings *settings )
 
 void VideoPlayerApp::setup()
 {
+    getWindow()->setTitle( "Video Bite" );
+    setupIcon();
+
     mViewportTransform.reset();
     mLastMouseDownTime = std::chrono::system_clock::now();
     ImGui::Initialize();
@@ -162,6 +176,29 @@ void VideoPlayerApp::setup()
         }
     }
     mCameraDeviceCount = ci::Capture::getDevices().size();
+
+    ImFontConfig fontConfig;
+    fontConfig.FontDataOwnedByAtlas = false;
+    mFont = ImGui::GetIO().Fonts->AddFontFromMemoryTTF( const_cast<unsigned char *>( RobotoRegular ), RobotoRegularLength, mFontSize, &fontConfig );
+    ImFontConfig fontAwsConfig;
+    fontAwsConfig.FontDataOwnedByAtlas = false;
+    mFontAwesomeTweaked = ImGui::GetIO().Fonts->AddFontFromMemoryTTF( const_cast< unsigned char * >( FontAwesome ), FontAwesomeLength, mFontSize, &fontAwsConfig );
+}
+
+void VideoPlayerApp::setupIcon()
+{
+#ifdef CINDER_MSW
+    HWND hwnd = ( HWND ) getWindow()->getNative();
+    HICON hIcon = static_cast< HICON >( LoadImage(
+        GetModuleHandle( nullptr ),
+        MAKEINTRESOURCE( 101 ),  // or whatever ID your icon is
+        IMAGE_ICON,
+        0, 0,
+        LR_DEFAULTCOLOR
+    ) );
+    SendMessage( hwnd, WM_SETICON, ICON_BIG, ( LPARAM ) hIcon );
+    SendMessage( hwnd, WM_SETICON, ICON_SMALL, ( LPARAM ) hIcon );
+#endif
 }
 
 void VideoPlayerApp::draw()
@@ -255,9 +292,13 @@ void VideoPlayerApp::update()
 
 void VideoPlayerApp::updateGui()
 {
+    ImGui::SetCurrentFont( mFont );
+
     const int ItemWidth = 40;
-    ImGui::Begin( "App Parameters " );
+    ImGui::Begin( "Controls" );
+#ifdef _DEBUG
     ImGui::Text( "fps: %f", ci::app::App::getAverageFps() );
+#endif
     ImGui::Text( "Frame: %ld", mFrameNumber );
    
     //ImGui::PushItemWidth( ItemWidth );
@@ -285,7 +326,7 @@ void VideoPlayerApp::updateGui()
     }
 
     auto constexpr textFlags = ImGuiInputTextFlags_None | ImGuiInputTextFlags_ReadOnly;
-    ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x - ( ImGui::GetFontSize() * 2.0f ) );
+    ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x - ( ImGui::GetFontSize() * 4.5f ) );
     ImGui::InputText( "##FilePath", const_cast<char *>( mPath.c_str() ), mPath.size(), textFlags );
     if( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
     {
@@ -349,8 +390,33 @@ void VideoPlayerApp::updateGui()
     {
         resetPanZoom();
     }
+    ImGui::SameLine();
+    if( ImGui::Button( "Prev Vid" ) )
+    {
+        prevVideo();
+    }
+    ImGui::SameLine();
+    if( ImGui::Button( "Next Vid" ) )
+    {
+        nextVideo();
+    }
 
-    if( ImGui::Button( ( mMovie && mMovie->isPlaying() ) ? "Pause" : "Play" ) )
+    ImGui::Separator();
+
+    ImGui::PushFont( mFontAwesomeTweaked );
+    constexpr const char * const StopStr = "f";
+    constexpr const char * const PlayStr = "d";
+    constexpr const char * const PauseStr = "e";
+    constexpr const char * const FFBwdStr = "c";
+    constexpr const char * const FFFwdStr = "g";
+
+    if( ImGui::Button( StopStr ) )
+    {
+        mMovie->stop();
+        mMovie->seekToStart();
+    }
+    ImGui::SameLine();
+    if( ImGui::Button( ( mMovie && mMovie->isPlaying() ) ? PauseStr : PlayStr ) )
     {
         if( mMovie )
         {
@@ -368,9 +434,20 @@ void VideoPlayerApp::updateGui()
             }
         }
     }
-    ImGui::Text( "Frame Count: %ld", mTotalFrameCount );
+    ImGui::SameLine();
+    if( ImGui::Button( FFBwdStr ) )
+    {
+        prevFrame();
+    }
+    ImGui::SameLine();
+    if( ImGui::Button( FFFwdStr ) )
+    {
+        nextFrame();
+    }
+    ImGui::PopFont();
     mSliderFrame = mMovie ? mMovie->getCurrentFrame() : 0;
-    if( ImGui::SliderInt("TimeLine", &mSliderFrame, 0, mTotalFrameCount ) )
+    ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x );// -( ImGui::GetFontSize() * 4.5f ) );
+    if( ImGui::SliderInt( "TimeLine", &mSliderFrame, 0, mTotalFrameCount ) )
     {
         seekToFrame( mSliderFrame );
         mIsSliding = true;
@@ -382,34 +459,9 @@ void VideoPlayerApp::updateGui()
     }
 #endif
 
-    ImGui::PushItemWidth( ItemWidth * 3.0f );
-    ImGui::InputInt( "Frame Number:", &mGotoFrame );
-    ImGui::SameLine();
-    if( ImGui::Button( "Go To" ) )
-    {
-        CI_LOG_I( "Seek to frame " + std::to_string( mGotoFrame ) );
-        mMovie->stop();
-        seekToFrame( mGotoFrame );
-    }
-    if( ImGui::Button( "Prev Frame" ) )
-    {
-        prevFrame();
-    }
-    ImGui::SameLine();
-    if( ImGui::Button( "Next Frame" ) )
-    {
-        nextFrame();
-    }
-    if( ImGui::InputFloat( "Rate", &mRate, 0.05f, 0.1f, 2 ) )
-    {
-        mRate = ci::clamp( mRate, 0.05f, 2.0f );
-        if( mMovie )
-        {
-            mMovie->setRate( mRate );
-            auto aa = mMovie->getRate();
-            int gg = 0;
-        }
-    }
+    ImGui::Text( "Frame Count: %ld", mTotalFrameCount );
+
+    ImGui::SameLine( ImGui::GetFontSize() * 8.5f );
     if( ImGui::Checkbox( "Repeat", &mDoesRepeat ) )
     {
         if( mDoesRepeat )
@@ -418,39 +470,67 @@ void VideoPlayerApp::updateGui()
         }
     }
 
-    if( ImGui::Checkbox( "Loop", &mDoesLoop ) )
+    ImGui::PushItemWidth( ItemWidth * 3.0f );
+    ImGui::InputInt( "##Frame Number", &mGotoFrame );
+    ImGui::SameLine();
+    if( ImGui::Button( "Jump To" ) )
     {
-        if( mDoesLoop )
+        if( mMovie )
         {
-            mDoesRepeat = false;
+            CI_LOG_I( "Seek to frame " + std::to_string( mGotoFrame ) );
+            mMovie->stop();
+            seekToFrame( mGotoFrame );
         }
     }
+    if( ImGui::InputFloat( "Rate", &mRate, 0.05f, 0.1f, 2 ) )
+    {
+        mRate = ci::clamp( mRate, 0.05f, 2.0f );
+        if( mMovie )
+        {
+            mMovie->setRate( mRate );
+        }
+    }
+    ImGui::Separator();
 
-    ImGui::InputInt( "Start Frame", &mLoopStartFrame );
-    ImGui::SameLine();
-    if( ImGui::Button( "Set##Start" ) )
+    if( ImGui::CollapsingHeader( "Loop" ) )
     {
-        if( mMovie )
+        if( ImGui::Checkbox( "Enable##Loop", &mDoesLoop ) )
         {
-            mLoopStartFrame = mMovie->getCurrentFrame();
+            if( mDoesLoop )
+            {
+                mDoesRepeat = false;
+            }
         }
-    }
-    ImGui::InputInt( "End Frame", &mLoopEndFrame );
-    ImGui::SameLine();
-    if( ImGui::Button( "Set##End" ) )
-    {
-        if( mMovie )
+
+        ImGui::InputInt( "Start Frame", &mLoopStartFrame );
+        ImGui::SameLine();
+        if( ImGui::Button( "Set##Start" ) )
         {
-            mLoopEndFrame = mMovie->getCurrentFrame();
+            if( mMovie )
+            {
+                mLoopStartFrame = mMovie->getCurrentFrame();
+            }
+        }
+        ImGui::InputInt( "End Frame  ", &mLoopEndFrame );
+        ImGui::SameLine();
+        if( ImGui::Button( "Set##End" ) )
+        {
+            if( mMovie )
+            {
+                mLoopEndFrame = mMovie->getCurrentFrame();
+            }
         }
     }
     
     ImGui::PopItemWidth();
-    if( mCameraDeviceCount != 0 )
+    
+    if( ImGui::CollapsingHeader( "Camera" ) )
     {
-        ImGui::Checkbox( "Enable Camera", &mEnableCamera );
+        if( mCameraDeviceCount != 0 )
+        {
+            ImGui::Checkbox( "Enable##Camera", &mEnableCamera );
+        }
     }
-
     ImGui::End();
 }
 
@@ -492,11 +572,11 @@ void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
         }
         case ci::app::KeyEvent::KEY_UP:
         {
-            loadMovie( std::clamp<int>( mSelectedVideoIndex - 1, 0, mVideoFilePaths.size() - 1 ) );
+            prevVideo();
         }
         case ci::app::KeyEvent::KEY_DOWN:
         {
-            loadMovie( std::clamp<int>( mSelectedVideoIndex + 1, 0, mVideoFilePaths.size() - 1 ) );
+            nextVideo();
         }
         default:
         {
@@ -557,7 +637,19 @@ void VideoPlayerApp::mouseWheel( ci::app::MouseEvent event )
 
 void VideoPlayerApp::fileDrop( ci::app::FileDropEvent event )
 {
-    loadMovie( event.getFile( 0 ).string() );
+    if( std::filesystem::is_directory( event.getFile( 0 ) ) )
+    {
+        mFileMode = FileMode::Directory;
+        mPath = event.getFile( 0 ).string();
+        if( loadMoviesInDir() )
+        {
+            loadMovie( 0 );
+        }
+    }
+    else
+    {
+        loadMovie( event.getFile( 0 ).string() );
+    }
 }
 
 void VideoPlayerApp::addZoom( float wheelIncrements )
@@ -700,6 +792,16 @@ void VideoPlayerApp::reset()
 #endif
 }
 
+void VideoPlayerApp::prevVideo()
+{
+    loadMovie( std::clamp<int>( mSelectedVideoIndex - 1, 0, mVideoFilePaths.size() - 1 ) );
+}
+
+void VideoPlayerApp::nextVideo()
+{
+    loadMovie( std::clamp<int>( mSelectedVideoIndex + 1, 0, mVideoFilePaths.size() - 1 ) );
+}
+
 void VideoPlayerApp::prevFrame()
 {
     if( !mMovie->isPlaying() )
@@ -835,9 +937,7 @@ bool VideoPlayerApp::isInVideoFrame( const ci::ivec2 &pos ) const
     return ( transformedArea.contains( pos ) );
 }
 
-
-
-
+/*
 void VideoPlayerApp::makeThumbnails( const std::string &dir )
 {
     CoInitialize( nullptr );
@@ -908,7 +1008,7 @@ bool saveHBitmapAsPng( HBITMAP hBitmap, const std::string &outputPath )
     return true;
 }
 
-
+*/
 
 CINDER_APP( VideoPlayerApp, ci::app::RendererGl( ci::app::RendererGl::Options() ), VideoPlayerApp::prepareSettings );
 

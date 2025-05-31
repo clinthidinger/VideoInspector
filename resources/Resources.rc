@@ -1,1 +1,2 @@
 #include "../include/Resources.h"
+IDI_ICON1 ICON DISCARDABLE "video_bite_logo_128.ico"
