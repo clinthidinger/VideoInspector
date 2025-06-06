@@ -5,11 +5,13 @@
 #include <cinder/app/App.h>
 #include <cinder/app/RendererGl.h>
 #include <cinder/Capture.h>
-#include <cinder/CinderImGui.h>
+//#include <cinder/CinderImGui.h>
+#include <CinderImGui.h>
 #include <cinder/gl/gl.h>
 #include <cinder/Log.h>
 #include <cinder/Utilities.h>
-#include <imgui/imgui_internal.h>
+//#include <imgui/imgui_internal.h>
+#include "../lib/imgui/imgui_internal.h"
 //#include <ci_nanovg_gl.hpp>
 #ifdef CINDER_LINUX
 #ifdef linux
@@ -22,6 +24,10 @@ using MovieRef = ci::qtime::MovieGlRef;
 #include "AxMovie.h"
 using MovieRef = AxMovieRef;
 #endif
+#endif
+#ifdef CINDER_MAC
+#include <cinder/qtime/QuickTimeGl.h>
+using MovieRef = ci::qtime::MovieGlRef;
 #endif
 #include "fonts/RobotoRegular.h"
 #include "fonts/FontAwesome-tweak.h"
@@ -140,26 +146,30 @@ private:
     static constexpr int DoubleClickMS{ 300 };
 };
 
+using namespace ci;
+using namespace ci::app;
+
 void VideoPlayerApp::prepareSettings( Settings *settings )
 {
 #if defined ( CINDER_MAC )
-    if( app::getWindowContentScale() > 1.0f )
-    {
-        settings->setHighDensityDisplayEnabled( true );
-    }
-    std::cout << "Mac window content scale: " << app::getWindowContentScale() << "\n";
+//    if( ci::app::getWindowContentScale() > 1.0f )
+//    {
+//        settings->setHighDensityDisplayEnabled( true );
+//    }
+//    std::cout << "Mac window content scale: " << app::getWindowContentScale() << "\n";
 #endif
     settings->setWindowSize( DefaultWindowWidth, DefaultWindowHeight );
 }
 
 void VideoPlayerApp::setup()
 {
-    getWindow()->setTitle( "Video Bite" );
+    ci::app::getWindow()->setTitle( "Video Bite" );
     setupIcon();
 
     mViewportTransform.reset();
     mLastMouseDownTime = std::chrono::system_clock::now();
     ImGui::Initialize();
+    
     auto args = getCommandLineArgs();
     if( args.size() > 1 )
     {
@@ -213,7 +223,7 @@ void VideoPlayerApp::draw()
         ci::gl::ScopedMatrices scopedMatrices;
         ci::gl::setMatricesWindow( viewportRect.getSize() );
 
-        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::ScopedModelMatrix scopedModelMtx;
         ci::gl::setModelMatrix( mCamFrameTransform.getMatrix() );
         ci::gl::draw( mCamFrameTex );
     }
@@ -226,7 +236,7 @@ void VideoPlayerApp::draw()
         ci::gl::ScopedMatrices scopedMatrices;
         ci::gl::setMatricesWindow( viewportRect.getSize() );
 
-        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::ScopedModelMatrix scopedModelMtx;
         ci::gl::setModelMatrix( mViewportTransform.getMatrix() );
 #ifdef CINDER_MSW
         if( !mMovie->isReady() )
@@ -260,17 +270,25 @@ void VideoPlayerApp::update()
         {
             if( mFrameNumber >= mLoopEndFrame )
             {
-                mSeekFinishedActions.push( [this] () {  mMovie->play(); } );
+                mSeekFinishedActions.push( [this] () {
+                    mMovie->play();
+                    std::this_thread::sleep_for( std::chrono::milliseconds(200));
+                    mMovie->setRate( mRate );
+                } );
                 seekToFrame( mLoopStartFrame );
             }
         }
         else
         {
-            if( ( mFrameNumber != 0 ) && ( mFrameNumber >= ( mTotalFrameCount - 1 ) ) )
+            if( ( mFrameNumber != 0 ) && ( mFrameNumber >= ( mTotalFrameCount - 4 ) ) )
             {
                 if( mDoesRepeat )
                 {
-                    mSeekFinishedActions.push( [this] () {  mMovie->play(); } );
+                    mSeekFinishedActions.push( [this] () {
+                        mMovie->play();
+                        std::this_thread::sleep_for( std::chrono::milliseconds(200));
+                        mMovie->setRate( mRate );
+                    } );
                 }
                 seekToFrame( 0 );
             }
@@ -292,7 +310,7 @@ void VideoPlayerApp::update()
 
 void VideoPlayerApp::updateGui()
 {
-    ImGui::SetCurrentFont( mFont );
+    //ImGui::SetCurrentFont( mFont );
 
     const int ItemWidth = 40;
     ImGui::Begin( "Controls" );
@@ -332,7 +350,7 @@ void VideoPlayerApp::updateGui()
     {
         if( !mPath.empty() )
         {
-            ImGui::SetTooltip( mPath.data() );
+            ImGui::SetTooltip( "%s", mPath.data() );
         }
         else
         {
@@ -344,7 +362,7 @@ void VideoPlayerApp::updateGui()
     {
         if( mFileMode == FileMode::File )
         {
-            auto const path = getOpenFilePath( mPath );
+            auto const path = ci::app::getOpenFilePath( mPath );
             if( !path.string().empty() )
             {
                 mPath = std::string( path.string().c_str() );
@@ -371,7 +389,7 @@ void VideoPlayerApp::updateGui()
 
     if( mFileMode == FileMode::Directory )
     {
-        ImGui::Text( "Video files [%d]", mVideoFilePaths.size() );
+        ImGui::Text( "Video files [%lu]", mVideoFilePaths.size() );
 
         // List box with all video files
         ImGui::BeginChild( "VideoListBox", ImVec2( 0, ImGui::GetFontSize() * 7 ), true );
@@ -422,7 +440,9 @@ void VideoPlayerApp::updateGui()
         {
             if( mMovie->isPlaying() )
             {
-                mMovie->pause();
+                
+                mMovie->stop();
+                //mMovie->pause();
             }
 #ifndef CINDER_MSW
             else if( !mIsSeeking )
@@ -459,7 +479,7 @@ void VideoPlayerApp::updateGui()
     }
 #endif
 
-    ImGui::Text( "Frame Count: %ld", mTotalFrameCount );
+    ImGui::Text( "Frame Count: %lld", mTotalFrameCount );
 
     ImGui::SameLine( ImGui::GetFontSize() * 8.5f );
     if( ImGui::Checkbox( "Repeat", &mDoesRepeat ) )
@@ -637,7 +657,7 @@ void VideoPlayerApp::mouseWheel( ci::app::MouseEvent event )
 
 void VideoPlayerApp::fileDrop( ci::app::FileDropEvent event )
 {
-    if( std::filesystem::is_directory( event.getFile( 0 ) ) )
+    if( fs::is_directory( event.getFile( 0 ) ) )
     {
         mFileMode = FileMode::Directory;
         mPath = event.getFile( 0 ).string();
@@ -719,7 +739,7 @@ void VideoPlayerApp::loadMovie( int index )
 {
     if( !mVideoFilePaths.empty() )
     {
-        mSelectedVideoIndex = std::clamp<int>( index, 0, mVideoFilePaths.size() - 1 );
+        mSelectedVideoIndex = ci::clamp<int>( index, 0, mVideoFilePaths.size() - 1 );
         loadMovie( mPath + "/" + mVideoFilePaths[mSelectedVideoIndex] );
         resetPanZoom();
     }
@@ -744,7 +764,8 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
     {
         mSeekFinishConn.disconnect();
     }
-    mSeekFinishConn = mMovie->getSeekFinishedSignal().connect( [this] () {
+    //*
+    mSeekFinishConn = mMovie->getJumpedSignal().connect( [this] () {
 #ifndef CINDER_MSW
         mIsSeeking = false;
 #endif
@@ -756,6 +777,7 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
 
         mSignalIsSeekFinished.emit();
     } );
+    //*/
 #ifdef CINDER_MSW
     if( mMovie->isReady() )
     {
@@ -769,10 +791,11 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
         resetPanZoom();
         mTotalFrameCount = mMovie->getFrameCount();
         mLoopEndFrame = mTotalFrameCount;
+        mMovie->setRate( mRate );
         mSignalIsReady.emit();
     } );
 #endif
-    mTotalFrameCount = mMovie->getFrameCount();
+    mTotalFrameCount = mMovie->getNumFrames();
     mLoopStartFrame = 0;
     mLoopEndFrame = mTotalFrameCount;
     mMovie->setRate( mRate );
@@ -794,12 +817,12 @@ void VideoPlayerApp::reset()
 
 void VideoPlayerApp::prevVideo()
 {
-    loadMovie( std::clamp<int>( mSelectedVideoIndex - 1, 0, mVideoFilePaths.size() - 1 ) );
+    loadMovie( ci::clamp<int>( mSelectedVideoIndex - 1, 0, mVideoFilePaths.size() - 1 ) );
 }
 
 void VideoPlayerApp::nextVideo()
 {
-    loadMovie( std::clamp<int>( mSelectedVideoIndex + 1, 0, mVideoFilePaths.size() - 1 ) );
+    loadMovie( ci::clamp<int>( mSelectedVideoIndex + 1, 0, mVideoFilePaths.size() - 1 ) );
 }
 
 void VideoPlayerApp::prevFrame()
@@ -859,7 +882,7 @@ bool VideoPlayerApp::loadMoviesInDir()
 
     try 
     {
-        for( const auto &entry : std::filesystem::directory_iterator( mPath ) ) 
+        for( const auto &entry : fs::directory_iterator( mPath ) )
         {
             if( entry.is_regular_file() ) 
             {
@@ -878,7 +901,7 @@ bool VideoPlayerApp::loadMoviesInDir()
         // Sort video files alphabetically
         std::sort( mVideoFilePaths.begin(), mVideoFilePaths.end() );
     }
-    catch( const std::filesystem::filesystem_error &e ) 
+    catch( const fs::filesystem_error &e )
     {
         std::cerr << "Error accessing directory: " << e.what() << std::endl;
     }

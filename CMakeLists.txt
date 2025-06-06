@@ -8,12 +8,12 @@ set( VERSION_MINOR "03" )
 set( VERSION_PATCH "01" )
 
 option(ENABLE_VIDEO "Show video" ON)
-set(CMAKE_C_COMPILER /usr/bin/gcc-11 CACHE PATH "" FORCE)
-set(CMAKE_CXX_COMPILER /usr/bin/g++-11 CACHE PATH "" FORCE)
+set(CMAKE_C_COMPILER /usr/bin/gcc CACHE PATH "" FORCE)
+set(CMAKE_CXX_COMPILER /usr/bin/g++ CACHE PATH "" FORCE)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -std=c++20")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++20")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++14")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
 
@@ -21,22 +21,27 @@ set( USE_SSL FALSE )
 set( CMAKE_BUILD_TYPE Debug )
 #set( CMAKE_BUILD_TYPE Release )
 
-get_filename_component( CINDER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../work/Cinder" ABSOLUTE )
-get_filename_component( ARG_ASSETS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../assets" ABSOLUTE )
+get_filename_component( CINDER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../Cinder" ABSOLUTE )
+#get_filename_component( ARG_ASSETS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../assets" ABSOLUTE )
 
 set(cinder_DIR ${CINDER_PATH}/lib/linux/x86_64/ogl/Release)
 include( "${CINDER_PATH}/proj/cmake/modules/cinderMakeApp.cmake" )
 
 
 set(SRC_FILES
-	src/AxMovie.h
-	src/AxMovie.cpp
 	src/VideoPlayerApp.cpp
 	src/graphics/ViewportTransform.h
 	src/graphics/Transform2D.h
 	src/graphics/Transform2D.cpp
 	include/Resources.h
 )
+
+if (WIN32)
+set(SRC_FILES ${SRC_FILES}
+	src/AxMovie.h
+	src/AxMovie.cpp
+)
+endif(WIN32)
 
 set(RESOURCE_FILES
 	resources/Resources.rc
@@ -66,7 +71,8 @@ set(INC_PATHS
 )
 
 set(BLOCK_FILES
-	blocks/Cinder-NanoVG
+	#blocks/Cinder-NanoVG
+	blocks/Cinder-ImGui
 )
 if( WIN32 )
 	set( BLOCK_FILES
@@ -84,10 +90,12 @@ ci_make_app(
 	CINDER_PATH ${CINDER_PATH}
 )
 
-#!!! Why do we need to do this???
-set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
-set_property(TARGET Cinder-NanoVG PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
-set_property(TARGET AX-MediaPlayer PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+if( WIN32 )
+	#!!! Why do we need to do this???
+	set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+	set_property(TARGET Cinder-NanoVG PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+	set_property(TARGET AX-MediaPlayer PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+endif( WIN32 )
 
 if( ${BUILD_INSTALLER} )
 	include( InstallRequiredSystemLibraries )
