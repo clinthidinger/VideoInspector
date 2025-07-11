@@ -132,7 +132,7 @@ private:
 
     ImFont *mFont{ nullptr };
     ImFont *mFontAwesomeTweaked{ nullptr };
-    static constexpr const int DefaultFontSize{ 16 };
+    static constexpr const int DefaultFontSize{ 20 };
     int mFontSize{ DefaultFontSize };
 
     static constexpr int DefaultWindowWidth{ 1280 };
@@ -728,6 +728,7 @@ void VideoPlayerApp::loadMovie( int index )
 void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
 {
     //mMovieFilePath = movieFilePath;
+    const bool wasPlaying = ( mMovie && mMovie->isPlaying() );
 #ifdef CINDER_MSW
     mMovie = AxMovie::create( movieFilePath );
 #else
@@ -765,17 +766,21 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
     {
         mIsReadyConn.disconnect();
     }
-    mIsReadyConn = mMovie->getIsReadySignal().connect( [this] () {
+    mIsReadyConn = mMovie->getIsReadySignal().connect( [this, wasPlaying] () {
         resetPanZoom();
         mTotalFrameCount = mMovie->getFrameCount();
         mLoopEndFrame = mTotalFrameCount;
+        mMovie->setRate( mRate );
+        if( wasPlaying )
+        {
+            mMovie->play();
+        }
         mSignalIsReady.emit();
     } );
 #endif
     mTotalFrameCount = mMovie->getFrameCount();
     mLoopStartFrame = 0;
     mLoopEndFrame = mTotalFrameCount;
-    mMovie->setRate( mRate );
 }
 
 void VideoPlayerApp::reset()
