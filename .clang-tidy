@@ -1,0 +1,33 @@
+Checks: >
+    -*;
+    bugprone-*,
+    misc-*,
+    modernize-*,
+    performance-*,
+    portability-*,
+    readability-*,
+    -modernize-use-trailing-return-type,
+    -misc-include-cleaner,
+    -misc-non-private-member-variables-in-classes,
+    -bugprone-easily-swappable-parameter,
+    -readability-identifier-length,
+    -readability-upppercase-literal-suffix
+
+CheckOptions:
+  - { key: readability-identifier-name.NamespaceCase,              value: lower_case }
+  - { key: readability-identifier-name.ClassCase,                  value: CamelCase  }
+  - { key: readability-identifier-name.StructCase,                 value: CamelCase  }
+  - { key: readability-identifier-name.TemplateParameterCase,      value: CamelCase  }
+  - { key: readability-identifier-name.FunctionCase,               value: CamelBack  }
+  - { key: readability-identifier-name.VariableCase,               value: CamelBack  }
+  - { key: readability-identifier-name.PrivateMemberSuffix,        value: m          }
+  - { key: readability-identifier-name.ProtectedMemberSuffix,      value: m          }
+  - { key: readability-identifier-name.MacroDefinitionCase,        value: CamelCase  }
+  - { key: readability-identifier-name.EnumConstantCase,           value: CamelCase  }
+  - { key: readability-identifier-name.ConstexprVariableCase,      value: CamelCase  }
+  - { key: readability-identifier-name.GlobalConstantCase,         value: CamelCase  }
+  - { key: readability-identifier-name.GlobalConstantPrefix,       value: g          }
+  - { key: readability-identifier-name.MemberConstantCase,         value: CamelCase  }
+  - { key: readability-identifier-name.MemberConstantPrefix,       value: k          }
+  - { key: readability-identifier-name.StaticConstantCase,         value: CamelCase  }
+  - { key: readability-identifier-name.StaticConstantPrefix,       value: s          }
