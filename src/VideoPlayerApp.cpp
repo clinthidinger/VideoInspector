@@ -225,7 +225,7 @@ void VideoPlayerApp::draw()
 
         ci::gl::ScopedModelMatrix scopedModelMtx;
         ci::gl::setModelMatrix( mCamFrameTransform.getMatrix() );
-        ci::gl::draw( mCamFrameTex );
+        ci::gl::draw( mCamFrameTex, ci::Rectf( mCamFrameTex->getWidth(), 0, 0, mCamFrameTex->getHeight() ) );
     }
 
     if( mMovie )
