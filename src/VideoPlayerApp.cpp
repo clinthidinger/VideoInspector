@@ -2,6 +2,8 @@
 #include <functional>
 #include <future>
 #include <queue>
+#include <chrono>
+#include <ctime>
 #include <cinder/app/App.h>
 #include <cinder/app/RendererGl.h>
 #include <cinder/Capture.h>
@@ -26,6 +28,7 @@ using MovieRef = AxMovieRef;
 #include "fonts/RobotoRegular.h"
 #include "fonts/FontAwesome-tweak.h"
 #include "graphics/ViewportTransform.h"
+#include "../blocks/AX-MediaPlayer/src/AX-MediaWriter.h"
 
 
 #ifdef CINDER_MSW
@@ -87,6 +90,9 @@ private:
     void setupCapture();
     bool isInCameraFrame( const ci::ivec2 &pos ) const;
     bool isInVideoFrame( const ci::ivec2 &pos ) const;
+    void startCameraRecording();
+    void stopCameraRecording();
+    std::string generateRecordingFilename() const;
 
     void makeThumbnails( const std::string &dir );
 
@@ -115,6 +121,10 @@ private:
     ci::CaptureRef mCapture;
     ci::gl::TextureRef mCamFrameTex;
     int mCameraDeviceCount{ 0 };
+    
+    bool mIsRecording{ false };
+    AX::Video::MediaWriterRef mCameraWriter;
+    std::string mRecordingFilePath;
     
     std::future<void> mThumbnailFut;
 
@@ -215,7 +225,7 @@ void VideoPlayerApp::draw()
 
         ci::gl::ScopedModelMatrix scopedModelMtx();
         ci::gl::setModelMatrix( mCamFrameTransform.getMatrix() );
-        ci::gl::draw( mCamFrameTex );
+        ci::gl::draw( mCamFrameTex, ci::Rectf( mCamFrameTex->getWidth(), 0, 0, mCamFrameTex->getHeight() ) );
     }
 
     if( mMovie )
@@ -286,6 +296,14 @@ void VideoPlayerApp::update()
         if( mCapture && mCapture->checkNewFrame() ) 
         {
             mCamFrameTex = ci::gl::Texture::create( *mCapture->getSurface() );
+            
+            if( mIsRecording && mCameraWriter && mCamFrameTex )
+            {
+                constexpr const bool flipUpDown = true;
+                constexpr const bool flipLeftRight = true;
+                constexpr const bool reverseRgb = true;
+                mCameraWriter->Write( mCamFrameTex, flipUpDown, flipLeftRight, reverseRgb );
+            }
         }
     }
 }
@@ -529,6 +547,37 @@ void VideoPlayerApp::updateGui()
         if( mCameraDeviceCount != 0 )
         {
             ImGui::Checkbox( "Enable##Camera", &mEnableCamera );
+            
+            if( mEnableCamera )
+            {
+                ImGui::Separator();
+                
+                if( !mIsRecording )
+                {
+                    if( ImGui::Button( "Start Recording" ) )
+                    {
+                        startCameraRecording();
+                    }
+                }
+                else
+                {
+                    if( ImGui::Button( "Stop Recording" ) )
+                    {
+                        stopCameraRecording();
+                    }
+                    ImGui::SameLine();
+                    ImGui::Text( "Recording..." );
+                }
+                
+                if( !mRecordingFilePath.empty() )
+                {
+                    ImGui::Text( "Output: %s", mRecordingFilePath.c_str() );
+                }
+            }
+        }
+        else
+        {
+            ImGui::Text( "No camera devices found" );
         }
     }
     ImGui::End();
@@ -785,6 +834,11 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
 
 void VideoPlayerApp::reset()
 {
+    if( mIsRecording )
+    {
+        stopCameraRecording();
+    }
+    
     if( mSeekFinishConn.isConnected() )
     {
         mSeekFinishConn.disconnect();
@@ -940,6 +994,59 @@ bool VideoPlayerApp::isInVideoFrame( const ci::ivec2 &pos ) const
     );
 
     return ( transformedArea.contains( pos ) );
+}
+
+void VideoPlayerApp::startCameraRecording()
+{
+    if( !mCapture || mIsRecording )
+    {
+        return;
+    }
+    
+    mRecordingFilePath = generateRecordingFilename();
+    auto captureSize = mCapture->getSize();
+    
+    constexpr int bitrate = 5000000;
+    constexpr int fps = 30;
+    
+    mCameraWriter = AX::Video::MediaWriter::Create( mRecordingFilePath, captureSize, bitrate, fps );
+    
+    if( mCameraWriter )
+    {
+        mIsRecording = true;
+        CI_LOG_I( "Started camera recording to: " + mRecordingFilePath );
+    }
+    else
+    {
+        CI_LOG_E( "Failed to create camera writer" );
+        mRecordingFilePath.clear();
+    }
+}
+
+void VideoPlayerApp::stopCameraRecording()
+{
+    if( !mIsRecording || !mCameraWriter )
+    {
+        return;
+    }
+    
+    mCameraWriter->Finalize();
+    mCameraWriter.reset();
+    mIsRecording = false;
+    
+    CI_LOG_I( "Stopped camera recording. File saved to: " + mRecordingFilePath );
+}
+
+std::string VideoPlayerApp::generateRecordingFilename() const
+{
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t( now );
+    auto tm = *std::localtime( &time_t );
+    
+    char buffer[100];
+    std::strftime( buffer, sizeof( buffer ), "camera_recording_%Y%m%d_%H%M%S.mp4", &tm );
+    
+    return std::string( buffer );
 }
 
 /*

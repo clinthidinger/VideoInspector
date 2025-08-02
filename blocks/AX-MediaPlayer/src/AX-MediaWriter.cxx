@@ -32,6 +32,7 @@ namespace AX::Video
 
         if ( SUCCEEDED ( hr ) )
         {
+            InitializeShaders();
             _fbo = ci::gl::Fbo::create ( _size.x, _size.y, ci::gl::Fbo::Format ( ).disableDepth ( ) );
 
             _rtStart = 0;
@@ -58,7 +59,7 @@ namespace AX::Video
         CoUninitialize ( );
     }
 
-    bool MediaWriter::Write ( ci::gl::TextureRef textureRef, bool flip )
+    bool MediaWriter::Write( ci::gl::TextureRef textureRef, bool flipUpDown, bool flipLeftRight, bool reverseRgb )
     {
         if ( !_isReady )
             return false;
@@ -76,15 +77,44 @@ namespace AX::Video
                 ci::gl::ScopedMatrices scopedMatrices;
                 ci::gl::setMatricesWindow( _fbo->getSize( ) );
 
-                if ( flip )
+                if( flipUpDown )
                 {
                     ci::gl::translate ( 0.0f, ( float ) _size.y, 0.0f );
                     ci::gl::scale ( 1.0f, -1.0f, 1.0f );
                 }
-                ci::gl::draw ( textureRef );
+                
+                if( reverseRgb && _rgbSwapShader )
+                {
+                    ci::gl::ScopedGlslProg scopedShader( _rgbSwapShader );
+                    ci::gl::ScopedTextureBind scopedTexture( textureRef, 0 );
+                    _rgbSwapShader->uniform( "uTexture", 0 );
+                    
+                    ci::Rectf drawRect;
+                    if( flipLeftRight )
+                    {
+                        drawRect = ci::Rectf( textureRef->getWidth(), 0, 0, textureRef->getHeight() );
+                    }
+                    else
+                    {
+                        drawRect = ci::Rectf( 0, 0, textureRef->getWidth(), textureRef->getHeight() );
+                    }
+                    
+                    ci::gl::drawSolidRect( drawRect );
+                }
+                else
+                {
+                    if( flipLeftRight )
+                    {
+                        ci::gl::draw( textureRef, ci::Rectf( textureRef->getWidth(), 0, 0, textureRef->getHeight() ) );
+                    }
+                    else
+                    {
+                        ci::gl::draw ( textureRef );
+                    }
+                }
             }
             auto surface = _fbo->readPixels8u ( _fbo->getBounds ( ) );
-            hr = WriteFrame ( surface.getData ( ) );
+            hr = WriteFrame ( surface.getData ( ) ); // Move to separate thread??? Can we add audio???
             if ( !SUCCEEDED ( hr ) )
             {
                 ci::app::console ( ) << "error on write" << std::endl;
@@ -288,5 +318,48 @@ namespace AX::Video
         pBuffer.reset ( );
 
         return hr;
+    }
+
+    void MediaWriter::InitializeShaders()
+    {
+        try 
+        {
+            const std::string vertexShader = R"(
+                #version 150
+                
+                uniform mat4 ciModelViewProjection;
+                
+                in vec4 ciPosition;
+                in vec2 ciTexCoord0;
+                
+                out vec2 TexCoord;
+                
+                void main() {
+                    gl_Position = ciModelViewProjection * ciPosition;
+                    TexCoord = ciTexCoord0;
+                }
+            )";
+            
+            const std::string fragmentShader = R"(
+                #version 150
+                
+                uniform sampler2D uTexture;
+                
+                in vec2 TexCoord;
+                out vec4 FragColor;
+                
+                void main() {
+                    vec4 texColor = texture(uTexture, TexCoord);
+                    FragColor = vec4(texColor.b, texColor.g, texColor.r, texColor.a);
+                }
+            )";
+            
+            _rgbSwapShader = ci::gl::GlslProg::create( vertexShader, fragmentShader );
+        }
+        catch( const std::exception& e ) 
+        {
+            ci::app::console() << "Failed to create RGB swap shader: " << e.what() << std::endl;
+            _rgbSwapShader = nullptr;
+        }
     }
 }

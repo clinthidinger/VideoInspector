@@ -25,7 +25,7 @@ namespace AX::Video
         MediaWriter ( const ci::fs::path & filePath, const ci::ivec2& size, int bitrate, int fps );
         ~MediaWriter ( );
 
-        bool Write ( ci::gl::TextureRef textureRef, bool flip = true );
+        bool Write ( ci::gl::TextureRef textureRef, bool flipUpDown = true, bool flipLeftRight = false, bool reverseRgb = false );
         bool Finalize ( );
     protected:
         HRESULT InitializeSinkWriter ( );
@@ -42,6 +42,9 @@ namespace AX::Video
         int _videoBitrate = 0;
         int _framerate = 0;
         ci::fs::path _filePath;
+        
+        ci::gl::GlslProgRef _rgbSwapShader;
+        void InitializeShaders();
 
         template <class T> void mfSafeRelease ( T** ppT )
         {
