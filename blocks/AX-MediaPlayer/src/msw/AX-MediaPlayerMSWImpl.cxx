@@ -566,8 +566,7 @@ namespace AX::Video
     {
         if ( _mediaEngine )
         {
-            //RunSynchronousInMTAThread ( [&] { _mediaEngine->SetMuted ( mute ); } );
-            _mediaEngine->SetMuted( mute );
+            RunSynchronousInMTAThread ( [&] { _mediaEngine->SetMuted ( mute ); } );
         }
     }
 
