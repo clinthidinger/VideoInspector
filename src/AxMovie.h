@@ -52,7 +52,7 @@ inline AxMovie::AxMovie( const std::string &filePath )
 {
 	auto fmt = AX::Video::MediaPlayer::Format()
 		.HardwareAccelerated( true )
-		.Audio( false );
+		.Audio( true );
 
 	mPlayer = AX::Video::MediaPlayer::Create( filePath, fmt );
 	//mPlayer->SetMuted( true );
