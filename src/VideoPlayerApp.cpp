@@ -304,17 +304,17 @@ void VideoPlayerApp::update()
         {
             setupCapture();
         }
-        if( mCapture && mCapture->checkNewFrame() ) 
+        if( mCapture && mCapture->checkNewFrame() )
         {
             mCamFrameTex = ci::gl::Texture::create( *mCapture->getSurface() );
-            
+
             if( mIsRecording && mCameraWriter && mCamFrameTex )
             {
                 constexpr const bool flipUpDown = true;
                 constexpr const bool flipLeftRight = true;
                 constexpr const bool reverseRgb = true;
                 mCameraWriter->Write( mCamFrameTex, flipUpDown, flipLeftRight, reverseRgb );
-                
+
                 // Record audio if enabled and available
                 if( mEnableAudioRecording && mAudioMonitor )
                 {
@@ -366,6 +366,16 @@ void VideoPlayerApp::update()
                     }
                 }
             }
+        }
+    }
+    else
+    {
+        // Camera disabled - stop capture to turn off camera light
+        if( mCapture )
+        {
+            mCapture->stop();
+            mCapture.reset();
+            mCamFrameTex.reset();
         }
     }
 }
