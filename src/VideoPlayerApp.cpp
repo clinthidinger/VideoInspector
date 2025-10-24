@@ -293,10 +293,10 @@ void VideoPlayerApp::update()
         {
             setupCapture();
         }
-        if( mCapture && mCapture->checkNewFrame() ) 
+        if( mCapture && mCapture->checkNewFrame() )
         {
             mCamFrameTex = ci::gl::Texture::create( *mCapture->getSurface() );
-            
+
             if( mIsRecording && mCameraWriter && mCamFrameTex )
             {
                 constexpr const bool flipUpDown = true;
@@ -304,6 +304,16 @@ void VideoPlayerApp::update()
                 constexpr const bool reverseRgb = true;
                 mCameraWriter->Write( mCamFrameTex, flipUpDown, flipLeftRight, reverseRgb );
             }
+        }
+    }
+    else
+    {
+        // Camera disabled - stop capture to turn off camera light
+        if( mCapture )
+        {
+            mCapture->stop();
+            mCapture.reset();
+            mCamFrameTex.reset();
         }
     }
 }
