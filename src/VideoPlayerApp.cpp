@@ -7,6 +7,9 @@
 #include <cinder/app/App.h>
 #include <cinder/app/RendererGl.h>
 #include <cinder/Capture.h>
+#include <cinder/audio/Context.h>
+#include <cinder/audio/MonitorNode.h>
+#include <cinder/audio/InputNode.h>
 #include <cinder/CinderImGui.h>
 #include <cinder/gl/gl.h>
 #include <cinder/Log.h>
@@ -88,6 +91,7 @@ private:
     void reset();
     bool loadMoviesInDir();
     void setupCapture();
+    void setupAudioInput();
     bool isInCameraFrame( const ci::ivec2 &pos ) const;
     bool isInVideoFrame( const ci::ivec2 &pos ) const;
     void startCameraRecording();
@@ -125,6 +129,12 @@ private:
     bool mIsRecording{ false };
     AX::Video::MediaWriterRef mCameraWriter;
     std::string mRecordingFilePath;
+    
+    ci::audio::InputDeviceNodeRef mAudioInput;
+    ci::audio::MonitorNodeRef mAudioMonitor;
+    ci::audio::BufferRef mAudioBuffer;
+    std::vector<float> mInterleavedAudioBuffer;
+    bool mEnableAudioRecording{ false };
     
     std::future<void> mThumbnailFut;
 
@@ -186,6 +196,7 @@ void VideoPlayerApp::setup()
         }
     }
     mCameraDeviceCount = ci::Capture::getDevices().size();
+    setupAudioInput();
 
     ImFontConfig fontConfig;
     fontConfig.FontDataOwnedByAtlas = false;
@@ -223,7 +234,7 @@ void VideoPlayerApp::draw()
         ci::gl::ScopedMatrices scopedMatrices;
         ci::gl::setMatricesWindow( viewportRect.getSize() );
 
-        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::ScopedModelMatrix scopedModelMtx;
         ci::gl::setModelMatrix( mCamFrameTransform.getMatrix() );
         ci::gl::draw( mCamFrameTex, ci::Rectf( mCamFrameTex->getWidth(), 0, 0, mCamFrameTex->getHeight() ) );
     }
@@ -236,7 +247,7 @@ void VideoPlayerApp::draw()
         ci::gl::ScopedMatrices scopedMatrices;
         ci::gl::setMatricesWindow( viewportRect.getSize() );
 
-        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::ScopedModelMatrix scopedModelMtx;
         ci::gl::setModelMatrix( mViewportTransform.getMatrix() );
 #ifdef CINDER_MSW
         if( !mMovie->isReady() )
@@ -303,6 +314,57 @@ void VideoPlayerApp::update()
                 constexpr const bool flipLeftRight = true;
                 constexpr const bool reverseRgb = true;
                 mCameraWriter->Write( mCamFrameTex, flipUpDown, flipLeftRight, reverseRgb );
+                
+                // Record audio if enabled and available
+                if( mEnableAudioRecording && mAudioMonitor )
+                {
+                    auto audioBuffer = mAudioMonitor->getBuffer();
+                    if( !audioBuffer.isEmpty() )
+                    {
+                        size_t numFrames = audioBuffer.getNumFrames();
+                        size_t numChannels = audioBuffer.getNumChannels();
+
+                        // Log less frequently to avoid spam
+                        static int audioFrameCount = 0;
+                        if( audioFrameCount % 30 == 0 )
+                        {
+                            CI_LOG_I( "Audio buffer: " << numFrames << " frames, "
+                                     << numChannels << " channels, "
+                                     << mAudioInput->getSampleRate() << " Hz" );
+                        }
+                        audioFrameCount++;
+
+                        // Cinder audio buffers are PLANAR (non-interleaved) by default
+                        // We need to convert to INTERLEAVED format for Media Foundation
+                        mInterleavedAudioBuffer.resize( numFrames * numChannels );
+
+                        if( numChannels == 1 )
+                        {
+                            // Mono: just copy
+                            std::memcpy( mInterleavedAudioBuffer.data(), audioBuffer.getData(), numFrames * sizeof(float) );
+                        }
+                        else if( numChannels == 2 )
+                        {
+                            // Stereo: interleave L and R channels
+                            const float* leftChannel = audioBuffer.getChannel( 0 );
+                            const float* rightChannel = audioBuffer.getChannel( 1 );
+
+                            for( size_t i = 0; i < numFrames; i++ )
+                            {
+                                mInterleavedAudioBuffer[i * 2] = leftChannel[i];
+                                mInterleavedAudioBuffer[i * 2 + 1] = rightChannel[i];
+                            }
+                        }
+
+                        if( !mCameraWriter->WriteAudio( mInterleavedAudioBuffer.data(),
+                                                        numFrames,
+                                                        numChannels,
+                                                        mAudioInput->getSampleRate() ) )
+                        {
+                            CI_LOG_W( "Failed to write audio frame" );
+                        }
+                    }
+                }
             }
         }
     }
@@ -551,6 +613,8 @@ void VideoPlayerApp::updateGui()
             if( mEnableCamera )
             {
                 ImGui::Separator();
+                
+                ImGui::Checkbox( "Enable Audio Recording", &mEnableAudioRecording );
                 
                 if( !mIsRecording )
                 {
@@ -1000,25 +1064,43 @@ void VideoPlayerApp::startCameraRecording()
 {
     if( !mCapture || mIsRecording )
     {
+        CI_LOG_W( "Cannot start recording: " << (mCapture ? "already recording" : "no capture device") );
         return;
     }
     
     mRecordingFilePath = generateRecordingFilename();
     auto captureSize = mCapture->getSize();
     
+    CI_LOG_I( "Attempting to create MediaWriter:" );
+    CI_LOG_I( "  File: " << mRecordingFilePath );
+    CI_LOG_I( "  Size: " << captureSize.x << "x" << captureSize.y );
+    CI_LOG_I( "  Audio enabled: " << (mEnableAudioRecording ? "yes" : "no") );
+    
     constexpr int bitrate = 5000000;
     constexpr int fps = 30;
     
-    mCameraWriter = AX::Video::MediaWriter::Create( mRecordingFilePath, captureSize, bitrate, fps );
-    
-    if( mCameraWriter )
+    try
     {
-        mIsRecording = true;
-        CI_LOG_I( "Started camera recording to: " + mRecordingFilePath );
+        int audioSampleRate = mAudioInput ? mAudioInput->getSampleRate() : 44100;
+        CI_LOG_I( "Creating MediaWriter with audio sample rate: " << audioSampleRate << " Hz" );
+
+        mCameraWriter = AX::Video::MediaWriter::Create( mRecordingFilePath, captureSize, bitrate, fps, mEnableAudioRecording, audioSampleRate );
+        
+        if( mCameraWriter )
+        {
+            mIsRecording = true;
+            CI_LOG_I( "Started camera recording to: " + mRecordingFilePath );
+        }
+        else
+        {
+            CI_LOG_E( "MediaWriter::Create returned null" );
+            mRecordingFilePath.clear();
+        }
     }
-    else
+    catch( const std::exception& e )
     {
-        CI_LOG_E( "Failed to create camera writer" );
+        CI_LOG_E( "Exception creating MediaWriter: " << e.what() );
+        mCameraWriter = nullptr;
         mRecordingFilePath.clear();
     }
 }
@@ -1030,7 +1112,18 @@ void VideoPlayerApp::stopCameraRecording()
         return;
     }
     
-    mCameraWriter->Finalize();
+    CI_LOG_I( "Finalizing camera recording..." );
+    
+    // Ensure we finalize properly
+    if( !mCameraWriter->Finalize() )
+    {
+        CI_LOG_E( "Failed to finalize MediaWriter" );
+    }
+    else
+    {
+        CI_LOG_I( "MediaWriter finalized successfully" );
+    }
+    
     mCameraWriter.reset();
     mIsRecording = false;
     
@@ -1047,6 +1140,47 @@ std::string VideoPlayerApp::generateRecordingFilename() const
     std::strftime( buffer, sizeof( buffer ), "camera_recording_%Y%m%d_%H%M%S.mp4", &tm );
     
     return std::string( buffer );
+}
+
+void VideoPlayerApp::setupAudioInput()
+{
+    try 
+    {
+        auto ctx = ci::audio::Context::master();
+        
+        // Get default input device
+        auto inputDevice = ci::audio::Device::getDefaultInput();
+        if( !inputDevice )
+        {
+            CI_LOG_W( "No audio input device found" );
+            return;
+        }
+        
+        // Create input node using makeNode  
+        auto inputFormat = ci::audio::InputDeviceNode::Format().channels( 2 );
+        mAudioInput = ctx->createInputDeviceNode( inputDevice, inputFormat );
+        
+        CI_LOG_I( "Audio input device: " << inputDevice->getName() );
+        CI_LOG_I( "Audio input channels: " << mAudioInput->getNumChannels() );
+        CI_LOG_I( "Audio input sample rate: " << mAudioInput->getSampleRate() );
+        
+        // Create monitor node to capture audio data
+        auto monitorFormat = ci::audio::MonitorNode::Format().windowSize( 1024 );
+        mAudioMonitor = ctx->makeNode( new ci::audio::MonitorNode( monitorFormat ) );
+        
+        // Connect input to monitor
+        mAudioInput >> mAudioMonitor;
+        
+        // Enable the input
+        mAudioInput->enable();
+        ctx->enable();
+        
+        CI_LOG_I( "Audio input initialized successfully" );
+    }
+    catch( const std::exception& e )
+    {
+        CI_LOG_E( "Failed to setup audio input: " << e.what() );
+    }
 }
 
 /*
