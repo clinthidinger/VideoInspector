@@ -29,6 +29,7 @@ using MovieRef = AxMovieRef;
 #include "fonts/FontAwesome-tweak.h"
 #include "graphics/ViewportTransform.h"
 #include "../blocks/AX-MediaPlayer/src/AX-MediaWriter.h"
+#include "GalleryView.h"
 
 
 #ifdef CINDER_MSW
@@ -67,6 +68,7 @@ public:
     void mouseWheel( ci::app::MouseEvent event ) override;
     void mouseDown( ci::app::MouseEvent event ) override;
     void mouseDrag( ci::app::MouseEvent event ) override;
+    void mouseMove( ci::app::MouseEvent event ) override;
     void mouseUp( ci::app::MouseEvent event ) override;
     void fileDrop( ci::app::FileDropEvent event ) override;
     
@@ -95,6 +97,7 @@ private:
     std::string generateRecordingFilename() const;
 
     void makeThumbnails( const std::string &dir );
+    void openGallery();
 
     enum class FileMode { File, Directory };
     FileMode mFileMode{ FileMode::File };
@@ -125,8 +128,9 @@ private:
     bool mIsRecording{ false };
     AX::Video::MediaWriterRef mCameraWriter;
     std::string mRecordingFilePath;
-    
+
     std::future<void> mThumbnailFut;
+    GalleryView mGalleryView;
 
 #ifndef CINDER_MSW
     std::atomic_bool mIsSeeking{ false };
@@ -193,6 +197,12 @@ void VideoPlayerApp::setup()
     ImFontConfig fontAwsConfig;
     fontAwsConfig.FontDataOwnedByAtlas = false;
     mFontAwesomeTweaked = ImGui::GetIO().Fonts->AddFontFromMemoryTTF( const_cast< unsigned char * >( FontAwesome ), FontAwesomeLength, mFontSize, &fontAwsConfig );
+
+    // Set up gallery selection callback
+    mGalleryView.setSelectionCallback( [this]( const std::string& videoPath ) {
+        loadMovie( videoPath );
+        resetPanZoom();
+    } );
 }
 
 void VideoPlayerApp::setupIcon()
@@ -214,7 +224,13 @@ void VideoPlayerApp::setupIcon()
 void VideoPlayerApp::draw()
 {
     ci::gl::clear();
-    
+
+    if( mGalleryView.isOpen() )
+    {
+        mGalleryView.draw();
+        return;
+    }
+
     if( mEnableCamera && mCamFrameTex )
     {
         const auto viewportRect = ci::app::getWindowBounds();
@@ -223,7 +239,7 @@ void VideoPlayerApp::draw()
         ci::gl::ScopedMatrices scopedMatrices;
         ci::gl::setMatricesWindow( viewportRect.getSize() );
 
-        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::ScopedModelMatrix scopedModelMtx;
         ci::gl::setModelMatrix( mCamFrameTransform.getMatrix() );
         ci::gl::draw( mCamFrameTex, ci::Rectf( mCamFrameTex->getWidth(), 0, 0, mCamFrameTex->getHeight() ) );
     }
@@ -236,7 +252,7 @@ void VideoPlayerApp::draw()
         ci::gl::ScopedMatrices scopedMatrices;
         ci::gl::setMatricesWindow( viewportRect.getSize() );
 
-        ci::gl::ScopedModelMatrix scopedModelMtx();
+        ci::gl::ScopedModelMatrix scopedModelMtx;
         ci::gl::setModelMatrix( mViewportTransform.getMatrix() );
 #ifdef CINDER_MSW
         if( !mMovie->isReady() )
@@ -257,11 +273,16 @@ void VideoPlayerApp::draw()
         }
 #endif
     }
-    
 }
 
 void VideoPlayerApp::update()
-{   
+{
+    if( mGalleryView.isOpen() )
+    {
+        mGalleryView.update();
+        return;
+    }
+
     updateGui();
     mFrameNumber = ( mMovie ) ? mMovie->getCurrentFrame() : 0;
     if( mMovie )
@@ -427,6 +448,11 @@ void VideoPlayerApp::updateGui()
     if( ImGui::Button( "Next Vid" ) )
     {
         nextVideo();
+    }
+    ImGui::SameLine();
+    if( ImGui::Button( "Gallery" ) )
+    {
+        openGallery();
     }
 
     ImGui::Separator();
@@ -595,6 +621,21 @@ void VideoPlayerApp::updateGui()
 
 void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
 {
+    // Handle Escape to close gallery
+    if( event.getCode() == ci::app::KeyEvent::KEY_ESCAPE )
+    {
+        if( mGalleryView.isOpen() )
+        {
+            mGalleryView.close();
+            return;
+        }
+        else
+        {
+            resetPanZoom();
+            return;
+        }
+    }
+
     if( mMovie == nullptr )
     {
         return;
@@ -612,11 +653,6 @@ void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
             {
                 mMovie->play();
             }
-            break;
-        }
-        case ci::app::KeyEvent::KEY_ESCAPE:
-        {
-            resetPanZoom();
             break;
         }
         case ci::app::KeyEvent::KEY_LEFT:
@@ -646,6 +682,15 @@ void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
 
 void VideoPlayerApp::mouseDown( ci::app::MouseEvent event )
 {
+    const ci::ivec2 &pos = event.getPos();
+
+    // Handle gallery mouse down first if gallery is open
+    if( mGalleryView.isOpen() )
+    {
+        mGalleryView.mouseDown( pos );
+        return;
+    }
+
     auto currTime = std::chrono::system_clock::now();
     auto deltaMS = std::chrono::duration_cast<std::chrono::milliseconds>( currTime - mLastMouseDownTime ).count();
 
@@ -654,20 +699,25 @@ void VideoPlayerApp::mouseDown( ci::app::MouseEvent event )
         resetPanZoom();
     }
 
-    const ci::ivec2 &pos = event.getPos();
     if( isInCameraFrame( pos ) && !isInVideoFrame( pos ) )
     {
         mCamFrameTransform.mouseDown( pos );
         mWasMouseDownInCamFrame = true;
         return;
     }
-    
+
     mViewportTransform.mouseDown( pos );
     mLastMouseDownTime = currTime;
 }
 
 void VideoPlayerApp::mouseDrag( ci::app::MouseEvent event )
 {
+    // Don't handle drag if gallery is open
+    if( mGalleryView.isOpen() )
+    {
+        return;
+    }
+
     const ci::ivec2 &pos = event.getPos();
     if( isInCameraFrame( pos ) && ( mWasMouseDownInCamFrame || !isInVideoFrame( pos ) ) )
     {
@@ -675,6 +725,14 @@ void VideoPlayerApp::mouseDrag( ci::app::MouseEvent event )
         return;
     }
     mViewportTransform.mouseDrag( pos );
+}
+
+void VideoPlayerApp::mouseMove( ci::app::MouseEvent event )
+{
+    if( mGalleryView.isOpen() )
+    {
+        mGalleryView.mouseMove( event.getPos() );
+    }
 }
 
 void VideoPlayerApp::mouseUp( ci::app::MouseEvent event )
@@ -685,6 +743,14 @@ void VideoPlayerApp::mouseUp( ci::app::MouseEvent event )
 void VideoPlayerApp::mouseWheel( ci::app::MouseEvent event )
 {
     const ci::ivec2 &pos = event.getPos();
+
+    // Handle gallery mouse wheel if gallery is open
+    if( mGalleryView.isOpen() )
+    {
+        mGalleryView.mouseWheel( pos, event.getWheelIncrement() );
+        return;
+    }
+
     if( isInCameraFrame( pos ) && !isInVideoFrame( pos ) )
     {
         mCamFrameTransform.mouseWheel( pos, event.getWheelIncrement() );
@@ -1052,11 +1118,34 @@ std::string VideoPlayerApp::generateRecordingFilename() const
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t( now );
     auto tm = *std::localtime( &time_t );
-    
+
     char buffer[100];
     std::strftime( buffer, sizeof( buffer ), "camera_recording_%Y%m%d_%H%M%S.mp4", &tm );
-    
+
     return std::string( buffer );
+}
+
+void VideoPlayerApp::openGallery()
+{
+    std::string galleryPath = mPath;
+
+    // If no directory is currently selected, open folder browser
+    if( galleryPath.empty() || !std::filesystem::is_directory( galleryPath ) )
+    {
+        auto const path = getFolderPath();
+        if( !path.string().empty() )
+        {
+            galleryPath = path.string();
+        }
+        else
+        {
+            // User cancelled folder selection
+            return;
+        }
+    }
+
+    // Open the gallery with the selected directory
+    mGalleryView.open( galleryPath );
 }
 
 /*

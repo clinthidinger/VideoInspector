@@ -1,7 +1,7 @@
 cmake_minimum_required( VERSION 3.20 FATAL_ERROR )
 set( CMAKE_VERBOSE_MAKEFILE ON )
 
-project( video-inspector )
+project( video-biter )
 
 set( VERSION_MAJOR "25" )
 set( VERSION_MINOR "03" )
@@ -32,6 +32,8 @@ set(SRC_FILES
 	src/AxMovie.h
 	src/AxMovie.cpp
 	src/VideoPlayerApp.cpp
+	src/GalleryView.h
+	src/GalleryView.cpp
 	src/graphics/ViewportTransform.h
 	src/graphics/Transform2D.h
 	src/graphics/Transform2D.cpp
