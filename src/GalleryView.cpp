@@ -565,6 +565,11 @@ void GalleryView::draw()
     }
 }
 
+void GalleryView::resize( const ci::ivec2 &size )
+{
+
+}
+
 ci::Rectf GalleryView::getCenteredRect( const ci::Rectf &r, const ci::vec2 &size )
 {
     float xScale = 1.0f;
@@ -643,6 +648,17 @@ void GalleryView::mouseDown(const ci::ivec2& pos)
             return;
         }
     }
+
+    mTransform.mouseDown( pos );
+}
+
+void GalleryView::mouseDrag( const ci::ivec2 &pos )
+{
+    if( !mIsOpen )
+    {
+        return;
+    }
+    mTransform.mouseDrag( pos );
 }
 
 void GalleryView::mouseMove(const ci::ivec2& pos)
@@ -669,6 +685,8 @@ void GalleryView::mouseWheel(const ci::ivec2& pos, float increment)
 
     // Update hover state after scrolling
     updateHoverState(pos);
+
+    mTransform.mouseWheel( pos, increment );
 }
 
 void GalleryView::selectVideo(int index)

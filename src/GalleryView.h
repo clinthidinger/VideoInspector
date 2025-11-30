@@ -17,6 +17,8 @@ using MovieRef = AxMovieRef;
 using MovieRef = ci::qtime::MovieGlRef;
 #endif
 
+#include "graphics/ViewportTransform.h"
+
 class GalleryView
 {
 public:
@@ -45,10 +47,12 @@ public:
 
     void update();
     void draw();
+    void resize( const ci::ivec2 &size );
 
-    void mouseDown(const ci::ivec2& pos);
-    void mouseMove(const ci::ivec2& pos);
-    void mouseWheel(const ci::ivec2& pos, float increment);
+    void mouseDown( const ci::ivec2& pos );
+    void mouseDrag( const ci::ivec2 &pos );
+    void mouseMove( const ci::ivec2& pos );
+    void mouseWheel( const ci::ivec2& pos, float increment );
 
     void setSelectionCallback(SelectionCallback callback) { mSelectionCallback = callback; }
 
@@ -72,13 +76,14 @@ private:
     std::string mCurrentDirectory;
     std::vector<VideoItem> mVideos;
     std::vector<std::string> mSubdirectories;
+    ViewportTransform mTransform;
 
     static constexpr float THUMBNAIL_SIZE = 180.0f;
     static constexpr float THUMBNAIL_SPACING = 20.0f;
     static constexpr int THUMBNAILS_PER_ROW = 5;
     static constexpr float GALLERY_TOP_MARGIN = 100.0f;
     static constexpr float HOVER_SCALE = 1.33f;
-    static constexpr float ANIM_DURATION = 1.0f;
+    static constexpr float ANIM_DURATION = 0.5f;
 
     SelectionCallback mSelectionCallback;
     int mHoveredIndex{ -1 };

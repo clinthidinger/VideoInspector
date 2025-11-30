@@ -31,6 +31,13 @@ include( "${CINDER_PATH}/proj/cmake/modules/cinderMakeApp.cmake" )
 set(SRC_FILES
 	src/AxMovie.h
 	src/AxMovie.cpp
+	src/ClipboardMonitor.h
+	src/ClipboardMonitor.cpp
+	src/DownloaderDialog.h
+	src/DownloaderDialog.cpp
+	src/DownloadModel.h
+	src/DownloadModel.cpp
+	src/AxMovie.cpp
 	src/VideoPlayerApp.cpp
 	src/GalleryView.h
 	src/GalleryView.cpp

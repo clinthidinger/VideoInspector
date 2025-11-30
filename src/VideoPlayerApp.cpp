@@ -29,6 +29,9 @@ using MovieRef = AxMovieRef;
 #include "fonts/FontAwesome-tweak.h"
 #include "graphics/ViewportTransform.h"
 #include "../blocks/AX-MediaPlayer/src/AX-MediaWriter.h"
+#include "ClipboardMonitor.h"
+#include "DownloaderDialog.h"
+#include "DownloadModel.h"
 #include "GalleryView.h"
 
 
@@ -54,6 +57,10 @@ using MovieRef = AxMovieRef;
 // camera feed and multi-viewport.  three transforms.
 // brightness/contrast?
 // gallery view
+// Drag and drop url, or detect clipboard has copied URL.
+// Gallery:
+// open and  close buttons, icons for parent or folders, transform.  Double click.  Text with ImGUI.  Caching strategy.
+// Intel realsense camera
 
 class VideoPlayerApp : public ci::app::App
 {
@@ -63,6 +70,7 @@ public:
     void setup() override;
     void setupIcon();
     void draw() override;
+    void resize() override;
     void update() override;
     void keyDown( ci::app::KeyEvent event ) override;
     void mouseWheel( ci::app::MouseEvent event ) override;
@@ -131,6 +139,8 @@ private:
 
     std::future<void> mThumbnailFut;
     GalleryView mGalleryView;
+    bool mDoShowDownloaderDlg{ false };
+    DownloadModel mDownloadModel;
 
 #ifndef CINDER_MSW
     std::atomic_bool mIsSeeking{ false };
@@ -203,6 +213,19 @@ void VideoPlayerApp::setup()
         loadMovie( videoPath );
         resetPanZoom();
     } );
+
+    ClipboardMonitor::getInstance();// setup Clipboard monitor.
+
+    ClipboardMonitor::getInstance().getUrlSig().connect( [this]( const std::string &url ) {
+       mDownloadModel.addUrl( url );
+       mDoShowDownloaderDlg = true;
+
+       #if defined( CINDER_MSW )
+            auto nativeWindow = static_cast<HWND>( ci::app::getWindow()->getNative() );
+            ::SetForegroundWindow( nativeWindow );
+            ::SetFocus( nativeWindow );
+#endif // CINDER_MSW
+    });
 }
 
 void VideoPlayerApp::setupIcon()
@@ -219,6 +242,15 @@ void VideoPlayerApp::setupIcon()
     SendMessage( hwnd, WM_SETICON, ICON_BIG, ( LPARAM ) hIcon );
     SendMessage( hwnd, WM_SETICON, ICON_SMALL, ( LPARAM ) hIcon );
 #endif
+}
+
+void VideoPlayerApp::resize()
+{
+    if( mGalleryView.isOpen() )
+    {
+        mGalleryView.resize( ci::app::getWindowSize() );
+        return;
+    }
 }
 
 void VideoPlayerApp::draw()
@@ -413,6 +445,7 @@ void VideoPlayerApp::updateGui()
                 {
                     loadMovie( 0 );
                 }
+                mDownloadModel.setOutputDir( path.string() );
                 //loadMovie( mMovieFilePath );
             }
         }
@@ -453,6 +486,11 @@ void VideoPlayerApp::updateGui()
     if( ImGui::Button( "Gallery" ) )
     {
         openGallery();
+    }
+    ImGui::SameLine();
+    if( ImGui::Button( "Downloader" ) )
+    {
+        mDoShowDownloaderDlg = true;
     }
 
     ImGui::Separator();
@@ -616,6 +654,12 @@ void VideoPlayerApp::updateGui()
             ImGui::Text( "No camera devices found" );
         }
     }
+
+    if( mDoShowDownloaderDlg )
+    {
+        mDoShowDownloaderDlg = downloader::drawDownloaderDialog( ci::ivec2( 20, 40 ), mDownloadModel );
+    }
+
     ImGui::End();
 }
 
@@ -1145,6 +1189,7 @@ void VideoPlayerApp::openGallery()
     }
 
     // Open the gallery with the selected directory
+    mGalleryView.resize( ci::app::getWindowSize() );
     mGalleryView.open( galleryPath );
 }
 
