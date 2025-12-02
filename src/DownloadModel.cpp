@@ -1,100 +1,16 @@
 #if 1
 #include "DownloadModel.h"
-#include <cstdlib>
 #include <array>
+#include <atomic>
+#include <cstdlib>
 #include <filesystem>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
-
-void DownloadModel::downloadAll()
-{
-    if( mIsDownloading )
-    {
-        return;
-    }
-    mFut = std::async(
-        [this]()
-        {
-            bool isEmpty = false;
-            {
-                std::scoped_lock<std::mutex> lk( mUrlListMutex );
-                isEmpty = mUrlList.empty();
-            }
-            while( !isEmpty )
-            {
-                std::string url;
-                {
-                    std::scoped_lock<std::mutex> lk( mUrlListMutex );
-                    url = mUrlList.front();
-                }
-                //auto const fileName = getOutputFilename( mUrlList.back(), mOutputDir );
-                //if( fileName.empty() || !std::filesystem::exists( fileName ) )
-                {
-                    download( mUrlList.back(), " -P \"" + mOutputDir + "\" -f best" );
-                }
-                {
-                    std::scoped_lock<std::mutex> lk( mUrlListMutex );
-                    mUrlList.pop_back();
-                    isEmpty = mUrlList.empty();
-                }
-            }// end while 
-        } );
-}
-
-//*
-std::string DownloadModel::getOutputFilename( const std::string &url, const std::string &outputDir )
-{
-    //YtDlpProcess process;
-    // Use --get-filename to get what the file would be named
-    std::string args = "-P \"" + outputDir + "\" --get-filename -o \"%(title)s.%(ext)s\"";
-    //YtDlpResult result = process.execute( url, args );
-    const int exitCode = download( url, args );
-
-    if( ( exitCode == 0 ) && !mProcessOutput.empty() )
-    {
-        // Trim whitespace/newlines
-        std::string filename = mProcessOutput;
-        filename.erase( filename.find_last_not_of( " \n\r\t" ) + 1 );
-        return filename;
-    }
-    return "";
-}
-//*/
-
-/*
-std::string callYtDlpWithOutput( const std::string &url, const std::string &additionalArgs = "" )
-{
-    std::string command = "yt-dlp " + additionalArgs + " \"" + url + "\"";
-    std::array<char, 128> buffer;
-    std::string result;
-
-#ifdef _WIN32
-    std::unique_ptr<FILE, decltype( &_pclose )> pipe( _popen( command.c_str(), "r" ), _pclose );
-#else
-    std::unique_ptr<FILE, decltype( &pclose )> pipe( popen( command.c_str(), "r" ), pclose );
-#endif
-
-    if( !pipe )
-    {
-        throw std::runtime_error( "popen() failed!" );
-    }
-
-    while( fgets( buffer.data(), buffer.size(), pipe.get() ) != nullptr )
-    {
-        result += buffer.data();
-    }
-
-    return result;
-}
-*/
-
-#include <filesystem>
-#include <iostream>
 #include <string>
-#include <atomic>
 #include <thread>
-#include <memory>
+#include <spdlog/spdlog.h>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -144,7 +60,8 @@ int DownloadModel::download( const std::string &url, const std::string &addition
     si.hStdError = hOutputWrite;
     si.dwFlags |= STARTF_USESTDHANDLES;
 
-    if( !CreateProcessA( NULL, const_cast<char *>( command.c_str() ), NULL, NULL, TRUE, 0, NULL, NULL, &si,
+    constexpr DWORD flags = CREATE_NO_WINDOW;
+    if( !CreateProcessA( NULL, const_cast<char *>( command.c_str() ), NULL, NULL, TRUE, flags, NULL, NULL, &si,
                             &mProcessInfo ) )
     {
         CloseHandle( hOutputWrite );
@@ -155,6 +72,8 @@ int DownloadModel::download( const std::string &url, const std::string &addition
     mIsRunning = true;
     CloseHandle( hOutputWrite );
 
+    //std::string output;
+    mProcessOutputs.emplace_back();
     char buffer[4096];
     DWORD bytesRead;
     while( mIsRunning 
@@ -164,10 +83,9 @@ int DownloadModel::download( const std::string &url, const std::string &addition
         buffer[bytesRead] = '\0';
         {
             std::scoped_lock<std::mutex> lk( mProcessOutputMutex );
-            mProcessOutput += buffer;
+            mProcessOutputs.back() += buffer;
         }
     }
-
     WaitForSingleObject( mProcessInfo.hProcess, INFINITE );
     DWORD exitCode = 0;
     GetExitCodeProcess( mProcessInfo.hProcess, &exitCode );
@@ -273,6 +191,116 @@ void DownloadModel::cancelDownload()
 #endif
 }
 
+void DownloadModel::downloadAll()
+{
+    if( mIsDownloading )
+    {
+        return;
+    }
+    if( !std::filesystem::exists( mDownloaderPath ) && !isCommandInPath( mDownloaderPath.c_str() ) )
+    {
+        spdlog::error( "{} path not valid.", mDownloaderPath );
+        return;
+    }
+
+    clearProcessOutputs();
+    mFut = std::async(
+        [this]()
+        {
+            bool isEmpty = false;
+            {
+                std::scoped_lock<std::mutex> lk( mUrlListMutex );
+                isEmpty = mUrlList.empty();
+            }
+            // TODO: verify downloader exe is legit.
+            while( !isEmpty )
+            {
+                std::string url;
+                {
+                    std::scoped_lock<std::mutex> lk( mUrlListMutex );
+                    url = mUrlList.front();
+                }
+                auto const fileName = getOutputFilename( mUrlList.back(), mOutputDir );
+                if( fileName.empty() || !std::filesystem::exists( fileName ) )
+                {
+                    download( mUrlList.back(), " --no-warnings --restrict-filenames --no-playlist -f best "
+                                               "-o \"" + mOutputDir + "\"/%(uploader)s_%(title)s_%(id)s.%(ext)s" );
+                }
+                {
+                    std::scoped_lock<std::mutex> lk( mUrlListMutex );
+                    mUrlList.pop_back();
+                    isEmpty = mUrlList.empty();
+                }
+            } // end while
+        } );
+}
+
+//*
+std::string DownloadModel::getOutputFilename( const std::string &url, const std::string &outputDir )
+{
+    // YtDlpProcess process;
+    //  Use --get-filename to get what the file would be named
+    std::string args =
+        "-P \"" + outputDir +
+        "\" --no-warnings --restrict-filenames --get-filename -o \"%(uploader)s_%(title)s_%(id)s.%(ext)s\"";
+    // YtDlpResult result = process.execute( url, args );
+    const int exitCode = download( url, args );
+
+    if( ( exitCode == 0 ) && !mProcessOutputs.empty() && !mProcessOutputs.back().empty() )
+    {
+        // Trim whitespace/newlines
+        std::string filename = mProcessOutputs.back();
+        filename.erase( filename.find_last_not_of( " \n\r\t" ) + 1 );
+        mProcessOutputs.pop_back();
+        return filename;
+    }
+
+    return "";
+}
+//*/
+
+/*
+std::string callYtDlpWithOutput( const std::string &url, const std::string &additionalArgs = "" )
+{
+    std::string command = "yt-dlp " + additionalArgs + " \"" + url + "\"";
+    std::array<char, 128> buffer;
+    std::string result;
+
+#ifdef _WIN32
+    std::unique_ptr<FILE, decltype( &_pclose )> pipe( _popen( command.c_str(), "r" ), _pclose );
+#else
+    std::unique_ptr<FILE, decltype( &pclose )> pipe( popen( command.c_str(), "r" ), pclose );
+#endif
+
+    if( !pipe )
+    {
+        throw std::runtime_error( "popen() failed!" );
+    }
+
+    while( fgets( buffer.data(), buffer.size(), pipe.get() ) != nullptr )
+    {
+        result += buffer.data();
+    }
+
+    return result;
+}
+*/
+
+
+
+bool DownloadModel::isCommandInPath( const char *command )
+{
+    char buffer[MAX_PATH];
+    DWORD result = SearchPathA( NULL,     // search in PATH
+                                command,  // command to find
+                                ".exe",   // default extension (can be NULL)
+                                MAX_PATH, // buffer size
+                                buffer,   // output buffer for full path
+                                NULL      // pointer to filename part (optional)
+    );
+
+    return result != 0;
+}
 
 //// Usage example
 //int main()

@@ -19,6 +19,7 @@ bool drawDownloaderDialog( const ci::ivec2 &size, IDownloadModel &model )
     ImGui::OpenPopup( title, ImGuiPopupFlags_None );
     if( ImGui::BeginPopupModal( title, nullptr, ImGuiWindowFlags_None ) )
     {
+        // TODO disable if mode.isDownloading()
         ImGui::Text( "Downloader" );
         ImGui::Text( "%s",  model.getDownloaderPath().c_str() );
         if( ImGui::Button( "Browse..." ) )
@@ -35,8 +36,10 @@ bool drawDownloaderDialog( const ci::ivec2 &size, IDownloadModel &model )
         ImGui::Dummy( ImVec2( 100, ImGui::GetTextLineHeight() * 0.86f ) );
 
         //FilePath to yt-dlp
+        ImGui::Text( "To Download" );
         int currIndex = -1;
-        if( ImGui::ListBox( "To Download", &currIndex, model.getUrlList(), -1 ) )
+        ImGui::SetNextItemWidth( ImGui::GetContentRegionAvailWidth() );
+        if( ImGui::ListBox( "##To Download", &currIndex, model.getUrlList(), 10 ) )
         {
 
         }
@@ -49,14 +52,17 @@ bool drawDownloaderDialog( const ci::ivec2 &size, IDownloadModel &model )
         {
 
         }
-        ImGui::InputTextMultiline( "Output", const_cast<std::string *>( & model.getProcessOutput()),
-                                   ImVec2( 0, 0 ), ImGuiInputTextFlags_ReadOnly );
+        ImGui::Text( "Outputs" );
+        ImGui::SetNextItemWidth( ImGui::GetContentRegionAvailWidth() );
+        ImGui::ListBox( "##Outputs", &currIndex, model.getProcessOutputs(), 10 );
+                                   //ImVec2( 0, 0 ), ImGuiInputTextFlags_ReadOnly );
 
         if( ImGui::Button( "Download" ) )
         {
             model.downloadAll();
         }
         ImGui::SameLine();
+        // TODO end disable if mode.isDownloading()
         if( ImGui::Button( "Cancel Download" ) )
         {
             model.cancelDownload();
@@ -74,7 +80,7 @@ bool drawDownloaderDialog( const ci::ivec2 &size, IDownloadModel &model )
         // ImGui::SetCursorPosY( std::max<float>( ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeight() -
         // ImGui::GetStyle().ItemSpacing.y, ImGui::GetCursorPosY() ) );
         ImGui::SetCursorPosX( ImGui::GetContentRegionAvail().x - ( btnSize.x ) );
-        if( ImGui::Button( "Ok", btnSize ) )
+        if( ImGui::Button( "Close", btnSize ) )
         {
             isOpen = false;
             ImGui::CloseCurrentPopup();

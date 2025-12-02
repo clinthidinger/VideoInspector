@@ -24,7 +24,8 @@ public:
     virtual void setOutputDir( const std::string &dir ) = 0;
     virtual const std::string &getDownloaderPath() const = 0;
     virtual void setDownloaderPath( const std::string &path ) = 0;
-    virtual const std::string &getProcessOutput() = 0;
+    virtual const std::vector<std::string> &getProcessOutputs() = 0;
+    virtual void clearProcessOutputs() = 0;
 };
 
 class DownloadModel : public IDownloadModel
@@ -42,11 +43,13 @@ public:
     void setOutputDir( const std::string &dir ) override;
     const std::string &getDownloaderPath() const override;
     void setDownloaderPath( const std::string &path ) override;
-    const std::string &getProcessOutput() override;
+    const std::vector<std::string> &getProcessOutputs() override;
+    void clearProcessOutputs();
 
 private:
     int download( const std::string &url, const std::string &additionalArgs = "" );
     std::string getOutputFilename( const std::string &url, const std::string &outputDir );
+    static bool isCommandInPath( const char *command );
 
     std::atomic_bool mIsDownloading{ false };
     std::vector<std::string> mUrlList;
@@ -62,7 +65,7 @@ private:
     std::future<void> mFut;
     std::mutex mUrlListMutex;
     std::mutex mProcessOutputMutex;
-    std::string mProcessOutput;
+    std::vector<std::string> mProcessOutputs;
     std::string mOutputDir;
     std::string mDownloaderPath{ "yt-dlp.exe" };
 };
@@ -77,6 +80,7 @@ inline const std::vector<std::string> &DownloadModel::getUrlList()
 inline void DownloadModel::addUrl( const std::string &url )
 {
     std::scoped_lock<std::mutex> lk( mUrlListMutex );
+    // TODO: Check if already in list.
     mUrlList.push_back( url );
 }
 
@@ -110,8 +114,14 @@ inline void DownloadModel::setDownloaderPath( const std::string &path )
     mDownloaderPath = path;
 }
 
-inline const std::string &DownloadModel::getProcessOutput()
+inline const std::vector<std::string> &DownloadModel::getProcessOutputs()
 {
     std::scoped_lock<std::mutex> lk( mProcessOutputMutex );
-    return mProcessOutput;
+    return mProcessOutputs;
+}
+
+inline void DownloadModel::clearProcessOutputs()
+{
+    std::scoped_lock<std::mutex> lk( mProcessOutputMutex );
+    mProcessOutputs.clear();
 }

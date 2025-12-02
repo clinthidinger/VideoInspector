@@ -56,6 +56,8 @@ public:
 
     void setSelectionCallback(SelectionCallback callback) { mSelectionCallback = callback; }
 
+    bool hasHoveredVideo() const;
+
 private:
     void loadVideosFromDirectory(const std::string& dirPath);
     void loadThumbnail(VideoItem& item);
@@ -89,4 +91,11 @@ private:
     int mHoveredIndex{ -1 };
     float mScrollOffset{ 0.0f };
     ci::vec2 mLastMousePos{ 0.0f };
+    std::chrono::system_clock::time_point mLastClickTime;
+    static constexpr int DoubleClickThreshMS = 500;
 };
+
+inline bool GalleryView::hasHoveredVideo() const
+{
+    return ( mHoveredIndex != -1 );
+}

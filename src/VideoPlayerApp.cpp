@@ -12,6 +12,7 @@
 #include <cinder/Log.h>
 #include <cinder/Utilities.h>
 #include <imgui/imgui_internal.h>
+#include <spdlog/spdlog.h>
 //#include <ci_nanovg_gl.hpp>
 #ifdef CINDER_LINUX
 #ifdef linux
@@ -81,6 +82,7 @@ public:
     void fileDrop( ci::app::FileDropEvent event ) override;
     
 private:
+    void invalidate();
     void updateGui();
     void addZoom( float wheelIncrements );
     void resetPanZoom();
@@ -158,6 +160,8 @@ private:
     ImFont *mFontAwesomeTweaked{ nullptr };
     static constexpr const int DefaultFontSize{ 20 };
     int mFontSize{ DefaultFontSize };
+    static constexpr int DefaultRefreshCount{ 60 * 3 };
+    int mRefreshCount{ DefaultRefreshCount };
 
     static constexpr int DefaultWindowWidth{ 1280 };
     static constexpr int DefaultWindowHeight{ 720 };
@@ -174,11 +178,14 @@ void VideoPlayerApp::prepareSettings( Settings *settings )
     std::cout << "Mac window content scale: " << app::getWindowContentScale() << "\n";
 #endif
     settings->setWindowSize( DefaultWindowWidth, DefaultWindowHeight );
+#ifdef _DEBUG
+    settings->setConsoleWindowEnabled();
+#endif
 }
 
 void VideoPlayerApp::setup()
 {
-    getWindow()->setTitle( "Video Bite" );
+    getWindow()->setTitle( "Video Biter" );
     setupIcon();
 
     mViewportTransform.reset();
@@ -212,6 +219,10 @@ void VideoPlayerApp::setup()
     mGalleryView.setSelectionCallback( [this]( const std::string& videoPath ) {
         loadMovie( videoPath );
         resetPanZoom();
+        if( mMovie )
+        {
+            mMovie->play();
+        }
     } );
 
     ClipboardMonitor::getInstance();// setup Clipboard monitor.
@@ -220,12 +231,36 @@ void VideoPlayerApp::setup()
        mDownloadModel.addUrl( url );
        mDoShowDownloaderDlg = true;
 
-       #if defined( CINDER_MSW )
+#if defined( CINDER_MSW )
             auto nativeWindow = static_cast<HWND>( ci::app::getWindow()->getNative() );
             ::SetForegroundWindow( nativeWindow );
             ::SetFocus( nativeWindow );
 #endif // CINDER_MSW
     });
+
+//#ifdef ENABLE_ENERGY_SAVER
+    auto renderer = std::static_pointer_cast<ci::app::RendererGl>( ci::app::getWindow()->getRenderer() );
+    renderer->setFinishDrawFn( [this] ( ci::app::Renderer *renderer )
+        {
+            if( mMovie && mMovie->isPlaying() )
+            {
+                renderer->swapBuffers();
+                return;
+            }
+            if( mGalleryView.isOpen() && mGalleryView.hasHoveredVideo() )
+            {
+                renderer->swapBuffers();
+                return;
+            }
+            if( mRefreshCount )
+            {
+                renderer->swapBuffers();
+                --mRefreshCount;
+            }
+        }
+    );
+//#endif
+
 }
 
 void VideoPlayerApp::setupIcon()
@@ -255,6 +290,12 @@ void VideoPlayerApp::resize()
 
 void VideoPlayerApp::draw()
 {
+    if( !mRefreshCount )
+    {
+        return;
+    }
+    //static uint64_t frameCount = 0;
+    //spdlog::info( "FrameCount: {}", frameCount++ );
     ci::gl::clear();
 
     if( mGalleryView.isOpen() )
@@ -369,6 +410,11 @@ void VideoPlayerApp::update()
             mCamFrameTex.reset();
         }
     }
+}
+
+void VideoPlayerApp::invalidate()
+{
+    mRefreshCount = DefaultRefreshCount;
 }
 
 void VideoPlayerApp::updateGui()
@@ -660,11 +706,48 @@ void VideoPlayerApp::updateGui()
         mDoShowDownloaderDlg = downloader::drawDownloaderDialog( ci::ivec2( 20, 40 ), mDownloadModel );
     }
 
+    if( ImGui::IsKeyPressed( ci::app::KeyEvent::KEY_g, false ) )
+    {
+        auto const key = ci::app::KeyEvent::KEY_g;
+        keyDown( ci::app::KeyEvent( ci::app::getWindow(), key, key, key, key, key ) );
+    }
+    else if( ImGui::IsKeyPressed( ci::app::KeyEvent::KEY_ESCAPE, false ) )
+    {
+        auto const key = ci::app::KeyEvent::KEY_ESCAPE;
+        keyDown( ci::app::KeyEvent( ci::app::getWindow(), key, key, key, key, key ) );
+    }
+    else if( ImGui::IsKeyPressed( ci::app::KeyEvent::KEY_SPACE, false ) )
+    {
+        auto const key = ci::app::KeyEvent::KEY_SPACE;
+        keyDown( ci::app::KeyEvent( ci::app::getWindow(), key, key, key, key, key ) );
+    }
+    else if( ImGui::IsKeyPressed( ci::app::KeyEvent::KEY_LEFT, false ) )
+    {
+        auto const key = ci::app::KeyEvent::KEY_LEFT;
+        keyDown( ci::app::KeyEvent( ci::app::getWindow(), key, key, key, key, key ) );
+    }
+    else if( ImGui::IsKeyPressed( ci::app::KeyEvent::KEY_RIGHT, false ) )
+    {
+        auto const key = ci::app::KeyEvent::KEY_RIGHT;
+        keyDown( ci::app::KeyEvent( ci::app::getWindow(), key, key, key, key, key ) );
+    }
+    else if( ImGui::IsKeyPressed( ci::app::KeyEvent::KEY_UP, false ) )
+    {
+        auto const key = ci::app::KeyEvent::KEY_UP;
+        keyDown( ci::app::KeyEvent( ci::app::getWindow(), key, key, key, key, key ) );
+    }
+    else if( ImGui::IsKeyPressed( ci::app::KeyEvent::KEY_DOWN, false ) )
+    {
+        auto const key = ci::app::KeyEvent::KEY_DOWN;
+        keyDown( ci::app::KeyEvent( ci::app::getWindow(), key, key, key, key, key ) );
+    }
+
     ImGui::End();
 }
 
 void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
 {
+    invalidate();
     // Handle Escape to close gallery
     if( event.getCode() == ci::app::KeyEvent::KEY_ESCAPE )
     {
@@ -680,6 +763,10 @@ void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
         }
     }
 
+    if( event.getCode() == ci::app::KeyEvent::KEY_g )
+    { 
+        openGallery();
+    }
     if( mMovie == nullptr )
     {
         return;
@@ -726,6 +813,7 @@ void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
 
 void VideoPlayerApp::mouseDown( ci::app::MouseEvent event )
 {
+    invalidate();
     const ci::ivec2 &pos = event.getPos();
 
     // Handle gallery mouse down first if gallery is open
@@ -756,9 +844,11 @@ void VideoPlayerApp::mouseDown( ci::app::MouseEvent event )
 
 void VideoPlayerApp::mouseDrag( ci::app::MouseEvent event )
 {
+    invalidate();
     // Don't handle drag if gallery is open
     if( mGalleryView.isOpen() )
     {
+        mGalleryView.mouseDrag( event.getPos() );
         return;
     }
 
@@ -776,17 +866,20 @@ void VideoPlayerApp::mouseMove( ci::app::MouseEvent event )
     if( mGalleryView.isOpen() )
     {
         mGalleryView.mouseMove( event.getPos() );
+        invalidate();
     }
 }
 
 void VideoPlayerApp::mouseUp( ci::app::MouseEvent event )
 {
     mWasMouseDownInCamFrame = false;
+    invalidate();
 }
 
 void VideoPlayerApp::mouseWheel( ci::app::MouseEvent event )
 {
     const ci::ivec2 &pos = event.getPos();
+    invalidate();
 
     // Handle gallery mouse wheel if gallery is open
     if( mGalleryView.isOpen() )
@@ -1171,7 +1264,15 @@ std::string VideoPlayerApp::generateRecordingFilename() const
 
 void VideoPlayerApp::openGallery()
 {
-    std::string galleryPath = mPath;
+    std::string galleryPath;
+    if( ( mFileMode == FileMode::File ) && std::filesystem::is_regular_file( mPath ) )
+    {
+        galleryPath = std::filesystem::path( mPath ).parent_path().string();
+    }
+    else
+    {
+        galleryPath = mPath;
+    }
 
     // If no directory is currently selected, open folder browser
     if( galleryPath.empty() || !std::filesystem::is_directory( galleryPath ) )
@@ -1188,9 +1289,16 @@ void VideoPlayerApp::openGallery()
         }
     }
 
+    if( mMovie )
+    {
+        mMovie->pause();
+    }
+
     // Open the gallery with the selected directory
     mGalleryView.resize( ci::app::getWindowSize() );
     mGalleryView.open( galleryPath );
+    mPath = galleryPath;
+    mFileMode = FileMode::Directory;
 }
 
 /*

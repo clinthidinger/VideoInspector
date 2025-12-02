@@ -34,6 +34,7 @@ void GalleryView::open(const std::string& directoryPath)
     mIsOpen = true;
     mCurrentDirectory = directoryPath;
     mScrollOffset = 0.0f;
+    mLastClickTime = std::chrono::system_clock::now();
     loadVideosFromDirectory(directoryPath);
 }
 
@@ -88,7 +89,7 @@ void GalleryView::loadVideosFromDirectory(const std::string& dirPath)
                 {
                     VideoItem item;
                     item.path = entry.path();
-                    loadThumbnail(item);
+                    loadThumbnail(item); // TODO: background thread.
                     mVideos.push_back(item);
                 }
             }
@@ -332,14 +333,15 @@ void GalleryView::updateHoverState(const ci::ivec2& mousePos)
     int newHoveredIndex = -1;
 
     // Adjust mouse position for scroll
-    ci::vec2 adjustedPos(mousePos.x, mousePos.y + mScrollOffset);
+    //ci::vec2 adjustedPos(mousePos.x, mousePos.y + mScrollOffset);
+    const ci::vec2 adjustedPos = mTransform.getInverseMatrix() * ci::vec4( ci::vec2( mousePos ), 0.0f, 1.0f );
 
     // Check which video is hovered
-    for (size_t i = 0; i < mVideos.size(); i++)
+    for( size_t i = 0; i < mVideos.size(); ++i )
     {
-        if (mVideos[i].rect.contains(adjustedPos))
+        if( mVideos[i].rect.contains( adjustedPos ) )
         {
-            newHoveredIndex = static_cast<int>(i);
+            newHoveredIndex = static_cast<int>( i );
             break;
         }
     }
@@ -348,14 +350,14 @@ void GalleryView::updateHoverState(const ci::ivec2& mousePos)
     //          " mHoveredIndex: " + std::to_string( mHoveredIndex ) );
 
     // Handle hover state changes
-    if (newHoveredIndex != mHoveredIndex)
+    if( newHoveredIndex != mHoveredIndex )
     {
         // Stop previously hovered video
-        if (mHoveredIndex >= 0 && mHoveredIndex < mVideos.size())
+        if( ( mHoveredIndex >= 0 ) && ( mHoveredIndex < mVideos.size() ) )
         {
             auto& prevVideo = mVideos[mHoveredIndex];
             prevVideo.isHovered = false;
-            if (prevVideo.movie)
+            if( prevVideo.movie )
             {
                 prevVideo.movie->stop();
                 //prevVideo.movie->seekToStart();
@@ -363,7 +365,7 @@ void GalleryView::updateHoverState(const ci::ivec2& mousePos)
                 prevVideo.movie.reset();
             }
             // Animate scale back to 1.0
-            ci::app::timeline().apply(&prevVideo.scale, 1.0f, ANIM_DURATION);
+            ci::app::timeline().apply( &prevVideo.scale, 1.0f, ANIM_DURATION );
         }
 
         // Start newly hovered video
@@ -419,7 +421,8 @@ void GalleryView::draw()
 
     // Set up matrices for scrolling
     ci::gl::ScopedMatrices matricesScope;
-    ci::gl::translate(0.0f, -mScrollOffset);
+    //ci::gl::translate(0.0f, -mScrollOffset);
+    ci::gl::multModelMatrix( mTransform.getMatrix() );
 
     // Draw header with directory info
     ci::gl::color(1.0f, 1.0f, 1.0f);
@@ -484,9 +487,9 @@ void GalleryView::draw()
 
             // Apply scaling animation
             ci::vec2 center = video.rect.getCenter();
-            ci::gl::translate(center);
+            //ci::gl::translate(center);
             //ci::gl::scale(video.scale.value(), video.scale.value());
-            ci::gl::translate(-center);
+            //ci::gl::translate(-center);
 
             // Draw thumbnail
             ci::gl::color(1.0f, 1.0f, 1.0f);
@@ -502,7 +505,8 @@ void GalleryView::draw()
             else
             {*/
                 ci::gl::color(0.5f, 0.5f, 0.5f);
-                ci::gl::drawStrokedRect(video.rect, 1.0f);
+                const float lineWidth = std::max( mTransform.getScale(), 1.0f );
+                ci::gl::drawStrokedRect( video.rect, lineWidth );
             }
         }
         else
@@ -600,7 +604,7 @@ void GalleryView::mouseDown(const ci::ivec2& pos)
     }
 
     // Adjust for scroll
-    ci::vec2 adjustedPos(pos.x, pos.y + mScrollOffset);
+    const ci::vec2 adjustedPos = mTransform.getInverseMatrix() * ci::vec4( ci::vec2( pos ), 0.0f, 1.0f );
 
     // Check for directory navigation clicks
     float buttonY = 20.0f;
@@ -644,8 +648,13 @@ void GalleryView::mouseDown(const ci::ivec2& pos)
     {
         if (mVideos[i].rect.contains(adjustedPos))
         {
-            selectVideo(static_cast<int>(i));
-            return;
+            auto nowTime = std::chrono::system_clock::now();
+            if( std::chrono::duration_cast< std::chrono::milliseconds >( nowTime - mLastClickTime ).count() < DoubleClickThreshMS )
+            {
+                selectVideo( static_cast<int>( i ) ); 
+                return;
+            }
+            mLastClickTime = nowTime;
         }
     }
 
@@ -680,11 +689,16 @@ void GalleryView::mouseWheel(const ci::ivec2& pos, float increment)
     }
 
     // Scroll the gallery
-    mScrollOffset -= increment * 20.0f;
-    mScrollOffset = std::max(0.0f, mScrollOffset);
+    //mScrollOffset -= increment * 20.0f;
+    //mScrollOffset = std::max(0.0f, mScrollOffset);
 
     // Update hover state after scrolling
     updateHoverState(pos);
+
+    //if( control is down)
+    //{ 
+    //    mTransform.setScale( mTransform.getScale() + increment );
+    //}
 
     mTransform.mouseWheel( pos, increment );
 }
