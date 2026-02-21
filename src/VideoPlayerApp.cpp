@@ -51,6 +51,13 @@ using MovieRef = AxMovieRef;
 #endif 
 
 // TODO:
+// Download needs refresh.  May not at 60 hz.
+// switching between gallery and regular needs to highlight last selection
+// switching to regular should not restart video. seek to time
+// make gallery fit size/dim of display better
+// refresh dir list after download completes
+// +/- keys to make gallery square bigger or smaller.
+// hot keys in gallery to go up,down, left,right
 // Buttons
 // Energy saver
 // Move list
@@ -223,6 +230,7 @@ void VideoPlayerApp::setup()
         {
             mMovie->play();
         }
+         invalidate();
     } );
 
     ClipboardMonitor::getInstance();// setup Clipboard monitor.
@@ -236,6 +244,7 @@ void VideoPlayerApp::setup()
             ::SetForegroundWindow( nativeWindow );
             ::SetFocus( nativeWindow );
 #endif // CINDER_MSW
+            invalidate();
     });
 
 //#ifdef ENABLE_ENERGY_SAVER
