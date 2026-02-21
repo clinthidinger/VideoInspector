@@ -26,6 +26,7 @@ using MovieRef = ci::qtime::MovieGlRef;
 using MovieRef = AxMovieRef;
 #endif
 #endif
+#include "ControllerManager.h"
 #include "fonts/RobotoRegular.h"
 #include "fonts/FontAwesome-tweak.h"
 #include "graphics/ViewportTransform.h"
@@ -115,6 +116,7 @@ private:
 
     void makeThumbnails( const std::string &dir );
     void openGallery();
+    void checkControllerInput( float dt );
 
     enum class FileMode { File, Directory };
     FileMode mFileMode{ FileMode::File };
@@ -148,6 +150,12 @@ private:
 
     std::future<void> mThumbnailFut;
     GalleryView mGalleryView;
+    ControllerManager mController;
+    float mPrevElapsedSecs{ 0.0f };
+    std::string mLastControllerAction;
+    float mActionDisplayTimer{ 0.0f };
+
+    void setControllerAction( const std::string &action ) { mLastControllerAction = action; mActionDisplayTimer = 3.0f; invalidate(); }
     bool mDoShowDownloaderDlg{ false };
     DownloadModel mDownloadModel;
 
@@ -359,6 +367,15 @@ void VideoPlayerApp::draw()
 
 void VideoPlayerApp::update()
 {
+    const float elapsed = static_cast<float>( ci::app::getElapsedSeconds() );
+    const float dt = elapsed - mPrevElapsedSecs;
+    mPrevElapsedSecs = elapsed;
+
+    mActionDisplayTimer = std::max( 0.0f, mActionDisplayTimer - dt );
+
+    mController.Update( dt );
+    checkControllerInput( dt );
+
     if( mGalleryView.isOpen() )
     {
         mGalleryView.update();
@@ -752,6 +769,16 @@ void VideoPlayerApp::updateGui()
     }
 
     ImGui::End();
+
+    if( mActionDisplayTimer > 0.0f )
+    {
+        auto* dl = ImGui::GetForegroundDrawList();
+        ImVec2 textSize = ImGui::CalcTextSize( mLastControllerAction.c_str() );
+        ImVec2 pos( ( ci::app::getWindowWidth()  - textSize.x ) * 0.5f,
+                      ci::app::getWindowHeight() - 80.0f );
+        dl->AddText( mFont, static_cast<float>( mFontSize ), pos,
+                     IM_COL32( 255, 255, 255, 255 ), mLastControllerAction.c_str() );
+    }
 }
 
 void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
@@ -1269,6 +1296,146 @@ std::string VideoPlayerApp::generateRecordingFilename() const
     std::strftime( buffer, sizeof( buffer ), "camera_recording_%Y%m%d_%H%M%S.mp4", &tm );
 
     return std::string( buffer );
+}
+
+void VideoPlayerApp::checkControllerInput( float dt )
+{
+    if( !mController.IsConnected() ) return;
+
+    using Btn = ControllerManager::Button;
+    using Ax  = ControllerManager::Axis;
+
+    // Triangle: toggle gallery
+    if( mController.IsButtonDown( Btn::Triangle ) )
+    {
+        if( mGalleryView.isOpen() ) { mGalleryView.close(); setControllerAction( "Close Gallery" ); }
+        else                        { openGallery();         setControllerAction( "Gallery" ); }
+    }
+
+    if( mGalleryView.isOpen() )
+    {
+        // D-pad and stick directions navigate the active video
+        int dc = 0, dr = 0;
+        if( mController.IsButtonDown( Btn::DpadLeft  ) || mController.IsButtonDown( Btn::LStickLeft  ) || mController.IsButtonDown( Btn::RStickLeft  ) ) dc = -1;
+        if( mController.IsButtonDown( Btn::DpadRight ) || mController.IsButtonDown( Btn::LStickRight ) || mController.IsButtonDown( Btn::RStickRight ) ) dc =  1;
+        if( mController.IsButtonDown( Btn::DpadUp    ) || mController.IsButtonDown( Btn::LStickUp    ) || mController.IsButtonDown( Btn::RStickUp    ) ) dr = -1;
+        if( mController.IsButtonDown( Btn::DpadDown  ) || mController.IsButtonDown( Btn::LStickDown  ) || mController.IsButtonDown( Btn::RStickDown  ) ) dr =  1;
+        if( dc != 0 || dr != 0 )
+        {
+            mGalleryView.navigateActive( dc, dr );
+            setControllerAction( "Navigate" );
+        }
+
+        // Cross: select active video and play in regular view
+        if( mController.IsButtonDown( Btn::Cross ) )
+        {
+            mGalleryView.selectActive();
+            setControllerAction( "Select" );
+        }
+
+        // R2: zoom in   L2: zoom out
+        constexpr float ZoomDeadZone = 0.1f;
+        float r2 = mController.GetAxis( Ax::R2 );
+        float l2 = mController.GetAxis( Ax::L2 );
+        if( r2 > ZoomDeadZone )      { mGalleryView.zoom(  r2 * 0.1f ); setControllerAction( "Zoom In"  ); invalidate(); }
+        else if( l2 > ZoomDeadZone ) { mGalleryView.zoom( -l2 * 0.1f ); setControllerAction( "Zoom Out" ); invalidate(); }
+    }
+    else
+    {
+        // D-pad up/down: previous/next video
+        if( mController.IsButtonDown( Btn::DpadUp ) )   { prevVideo(); setControllerAction( "Prev Video" ); }
+        if( mController.IsButtonDown( Btn::DpadDown ) )  { nextVideo(); setControllerAction( "Next Video" ); }
+
+        // R3: toggle loop
+        if( mController.IsButtonDown( Btn::R3 ) )
+        {
+            mDoesLoop = !mDoesLoop;
+            if( mDoesLoop ) mDoesRepeat = false;
+            setControllerAction( mDoesLoop ? "Loop On" : "Loop Off" );
+        }
+
+        if( mMovie )
+        {
+            // Cross: play/pause
+            if( mController.IsButtonDown( Btn::Cross ) )
+            {
+                if( mMovie->isPlaying() ) { mMovie->pause(); setControllerAction( "Pause" ); }
+                else                     { mMovie->play();  setControllerAction( "Play"  ); }
+            }
+
+            // L1: prev frame   R1: next frame
+            if( mController.IsButtonDown( Btn::L1 ) )  { prevFrame(); setControllerAction( "Prev Frame" ); }
+            if( mController.IsButtonDown( Btn::R1 ) )  { nextFrame(); setControllerAction( "Next Frame" ); }
+
+            // Square: set loop start   Circle: set loop end
+            if( mController.IsButtonDown( Btn::Square ) )
+            {
+                mLoopStartFrame = static_cast<int>( mMovie->getCurrentFrame() );
+                setControllerAction( "Loop Start: " + std::to_string( mLoopStartFrame ) );
+            }
+            if( mController.IsButtonDown( Btn::Circle ) )
+            {
+                mLoopEndFrame = static_cast<int>( mMovie->getCurrentFrame() );
+                setControllerAction( "Loop End: " + std::to_string( mLoopEndFrame ) );
+            }
+
+            constexpr float DeadZone = 0.1f;
+            constexpr float ScrubFramesPerSec = 60.0f;
+
+            // Left analog left/right: scrub timeline
+            float lx = mController.GetAxis( Ax::LX );
+            if( std::abs( lx ) > DeadZone )
+            {
+                auto delta = static_cast<int64_t>( lx * ScrubFramesPerSec * dt );
+                if( delta != 0 )
+                {
+                    seekToFrame( std::clamp( mFrameNumber + delta, int64_t( 0 ), mTotalFrameCount - 1 ) );
+                    setControllerAction( "Scrub" );
+                }
+            }
+
+            // Right analog left/right: step rate up or down
+            constexpr float RateStep = 0.05f;
+            if( mController.IsButtonDown( Btn::RStickRight ) )
+            {
+                mRate = std::min( mRate + RateStep, 3.0f );
+                mMovie->setRate( mRate );
+                char buf[32]; std::snprintf( buf, sizeof( buf ), "Rate: %.2fx", mRate );
+                setControllerAction( buf );
+            }
+            else if( mController.IsButtonDown( Btn::RStickLeft ) )
+            {
+                mRate = std::max( mRate - RateStep, 0.05f );
+                mMovie->setRate( mRate );
+                char buf[32]; std::snprintf( buf, sizeof( buf ), "Rate: %.2fx", mRate );
+                setControllerAction( buf );
+            }
+
+            // R2: fast forward (seek forward proportional to trigger)
+            float r2 = mController.GetAxis( Ax::R2 );
+            if( r2 > DeadZone )
+            {
+                auto delta = static_cast<int64_t>( r2 * ScrubFramesPerSec * dt );
+                if( delta != 0 )
+                {
+                    seekToFrame( std::clamp( mFrameNumber + delta, int64_t( 0 ), mTotalFrameCount - 1 ) );
+                    setControllerAction( "Fast Forward" );
+                }
+            }
+
+            // L2: rewind (seek backward proportional to trigger)
+            float l2 = mController.GetAxis( Ax::L2 );
+            if( l2 > DeadZone )
+            {
+                auto delta = static_cast<int64_t>( l2 * ScrubFramesPerSec * dt );
+                if( delta != 0 )
+                {
+                    seekToFrame( std::max<int64_t>( mFrameNumber - delta, 0 ) );
+                    setControllerAction( "Rewind" );
+                }
+            }
+        }
+    }
 }
 
 void VideoPlayerApp::openGallery()

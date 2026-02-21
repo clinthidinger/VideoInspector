@@ -8,8 +8,8 @@ set( VERSION_MINOR "03" )
 set( VERSION_PATCH "01" )
 
 option(ENABLE_VIDEO "Show video" ON)
-set(CMAKE_C_COMPILER /usr/bin/gcc-11 CACHE PATH "" FORCE)
-set(CMAKE_CXX_COMPILER /usr/bin/g++-11 CACHE PATH "" FORCE)
+#set(CMAKE_C_COMPILER /usr/bin/gcc-11 CACHE PATH "" FORCE)
+#set(CMAKE_CXX_COMPILER /usr/bin/g++-11 CACHE PATH "" FORCE)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -std=c++20")
@@ -27,6 +27,7 @@ get_filename_component( ARG_ASSETS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../asset
 set(cinder_DIR ${CINDER_PATH}/lib/linux/x86_64/ogl/Release)
 include( "${CINDER_PATH}/proj/cmake/modules/cinderMakeApp.cmake" )
 
+add_subdirectory(controller_manager)
 
 set(SRC_FILES
 	src/AxMovie.h
@@ -93,10 +94,15 @@ ci_make_app(
 	CINDER_PATH ${CINDER_PATH}
 )
 
+target_link_libraries(${PROJECT_NAME} PRIVATE ControllerManager)
+
 #!!! Why do we need to do this???
 set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
 set_property(TARGET Cinder-NanoVG PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
 set_property(TARGET AX-MediaPlayer PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+set_property(TARGET ControllerManager PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+set_property(TARGET hidapi_winapi    PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
+set_property(TARGET GamepadCore      PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" )
 
 if( ${BUILD_INSTALLER} )
 	include( InstallRequiredSystemLibraries )

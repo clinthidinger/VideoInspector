@@ -1,0 +1,12 @@
+﻿# External Libraries
+Libs/
+Tests/
+
+# Binary data and Datasets
+*.wav
+*.bin
+Datasets/
+
+# Build directories
+cmake-build-debug/
+cmake-build-release/

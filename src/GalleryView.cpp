@@ -34,6 +34,7 @@ void GalleryView::open(const std::string& directoryPath)
     mIsOpen = true;
     mCurrentDirectory = directoryPath;
     mScrollOffset = 0.0f;
+    mTransform.reset();
     mLastClickTime = std::chrono::system_clock::now();
     loadVideosFromDirectory(directoryPath);
 }
@@ -52,7 +53,7 @@ void GalleryView::close()
     mVideos.clear();
     mSubdirectories.clear();
     mIsOpen = false;
-    mHoveredIndex = -1;
+    mActiveIndex = -1;
 }
 
 void GalleryView::loadVideosFromDirectory(const std::string& dirPath)
@@ -302,9 +303,9 @@ void GalleryView::update()
     // Should have a handle to playing video.  No for loop!!!
     // Update playing videos
     //for (auto& video : mVideos)
-    if( mHoveredIndex != -1 )
+    if( mActiveIndex != -1 )
     {
-        auto &video = mVideos[mHoveredIndex];
+        auto &video = mVideos[mActiveIndex];
         if (video.isHovered && video.movie && video.movie->isPlaying())
         {
 #ifdef CINDER_MSW
@@ -328,83 +329,94 @@ void GalleryView::update()
     */
 }
 
+void GalleryView::setActiveIndex(int newIndex)
+{
+    if( newIndex == mActiveIndex ) return;
+
+    // Deactivate previously active video
+    if( ( mActiveIndex >= 0 ) && ( mActiveIndex < (int)mVideos.size() ) )
+    {
+        auto& prev = mVideos[mActiveIndex];
+        prev.isHovered = false;
+        if( prev.movie )
+        {
+            prev.movie->stop();
+            prev.isReadyConn.disconnect();
+            prev.movie.reset();
+        }
+        ci::app::timeline().apply( &prev.scale, 1.0f, ANIM_DURATION );
+    }
+
+    // Activate newly selected video
+    if( newIndex >= 0 && newIndex < (int)mVideos.size() )
+    {
+        auto& newVid = mVideos[newIndex];
+        newVid.isHovered = true;
+#ifdef CINDER_MSW
+        newVid.movie = AxMovie::create( newVid.path.string() );
+#else
+        newVid.movie = ci::qtime::MovieGl::create( newVid.path.string() );
+#endif
+        newVid.isReadyConn = newVid.movie->getIsReadySignal().connect(
+            [this, &newVid]()
+            {
+                if( !newVid.movie->isPlaying() )
+                {
+                    newVid.movie->play();
+                }
+            } );
+        if( newVid.movie )
+        {
+            newVid.movie->play();
+        }
+        ci::app::timeline().apply( &newVid.scale, HOVER_SCALE, ANIM_DURATION );
+
+        // Pan so the active item is near the screen center
+        ci::vec2 contentCenter  = mVideos[newIndex].rect.getCenter();
+        ci::vec2 currentOnScreen = ci::vec2( mTransform.getMatrix() * ci::vec4( contentCenter, 0.0f, 1.0f ) );
+        ci::vec2 delta           = ci::app::getWindowCenter() - currentOnScreen;
+        mTransform.setTranslation( mTransform.getTranslation() + delta );
+    }
+
+    mActiveIndex = newIndex;
+}
+
 void GalleryView::updateHoverState(const ci::ivec2& mousePos)
 {
-    int newHoveredIndex = -1;
-
-    // Adjust mouse position for scroll
-    //ci::vec2 adjustedPos(mousePos.x, mousePos.y + mScrollOffset);
     const ci::vec2 adjustedPos = mTransform.getInverseMatrix() * ci::vec4( ci::vec2( mousePos ), 0.0f, 1.0f );
 
-    // Check which video is hovered
+    int newIndex = -1;
     for( size_t i = 0; i < mVideos.size(); ++i )
     {
         if( mVideos[i].rect.contains( adjustedPos ) )
         {
-            newHoveredIndex = static_cast<int>( i );
+            newIndex = static_cast<int>( i );
             break;
         }
     }
-    //spdlog::info( "newHoveredIndex, mHoveredIndex: {}, {}", newHoveredIndex, mHoveredIndex );
-    //CI_LOG_E( "newHoveredIndex: " + std::to_string( newHoveredIndex ) +
-    //          " mHoveredIndex: " + std::to_string( mHoveredIndex ) );
 
-    // Handle hover state changes
-    if( newHoveredIndex != mHoveredIndex )
-    {
-        // Stop previously hovered video
-        if( ( mHoveredIndex >= 0 ) && ( mHoveredIndex < mVideos.size() ) )
-        {
-            auto& prevVideo = mVideos[mHoveredIndex];
-            prevVideo.isHovered = false;
-            if( prevVideo.movie )
-            {
-                prevVideo.movie->stop();
-                //prevVideo.movie->seekToStart();
-                prevVideo.isReadyConn.disconnect();
-                prevVideo.movie.reset();
-            }
-            // Animate scale back to 1.0
-            ci::app::timeline().apply( &prevVideo.scale, 1.0f, ANIM_DURATION );
-        }
+    setActiveIndex( newIndex );
+}
 
-        // Start newly hovered video
-        if (newHoveredIndex >= 0 && newHoveredIndex < mVideos.size())
-        {
-            auto& newVideo = mVideos[newHoveredIndex];
-            newVideo.isHovered = true; // same thing???
-#ifdef CINDER_MSW
-            newVideo.movie = AxMovie::create( newVideo.path.string() );
-#else
-            newVideo.movie = ci::qtime::MovieGl::create( newVideo.path.string() );
-#endif
-            newVideo.isReadyConn = newVideo.movie->getIsReadySignal().connect(
-                [this, &newVideo]()
-                {
-                    //resetPanZoom();
-                    //mTotalFrameCount = mMovie->getFrameCount();
-                    //mLoopEndFrame = mTotalFrameCount;
-                    //mMovie->setRate( mRate );
-                    //if( wasPlaying )
-                    //{
-                    if( !newVideo.movie->isPlaying() )
-                    {
-                        newVideo.movie->play();
-                    }
-                    //}
-                    //mSignalIsReady.emit();
-                } );
-            if (newVideo.movie)
-            {
-                newVideo.movie->play();
-            }
+void GalleryView::navigateActive( int dc, int dr )
+{
+    if( mVideos.empty() ) return;
 
-            // Animate scale to HOVER_SCALE
-            ci::app::timeline().apply(&newVideo.scale, HOVER_SCALE, ANIM_DURATION);
-        }
+    int startIdx = ( mActiveIndex >= 0 ) ? mActiveIndex : 0;
+    int newIdx = startIdx + dc + dr * THUMBNAILS_PER_ROW;
+    newIdx = std::clamp( newIdx, 0, static_cast<int>( mVideos.size() ) - 1 );
+    setActiveIndex( newIdx );
+}
 
-        mHoveredIndex = newHoveredIndex;
-    }
+void GalleryView::selectActive()
+{
+    selectVideo( mActiveIndex );
+}
+
+void GalleryView::zoom( float increment )
+{
+    ci::vec2 center = ci::app::getWindowCenter();
+    mTransform.mouseWheel( center, increment );
 }
 
 void GalleryView::draw()
@@ -530,9 +542,9 @@ void GalleryView::draw()
         ci::gl::drawStringCentered(filename, ci::vec2(video.rect.getCenter().x, video.rect.y2 + 15), ci::Color::white());
     }
 
-    if( mHoveredIndex != -1 )
+    if( mActiveIndex != -1 )
     {
-        auto &video = mVideos[mHoveredIndex];
+        auto &video = mVideos[mActiveIndex];
         if( video.movie && video.movie->isReady() && video.movie->isPlaying() )
         {
             {

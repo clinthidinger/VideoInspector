@@ -54,6 +54,13 @@ public:
     void mouseMove( const ci::ivec2& pos );
     void mouseWheel( const ci::ivec2& pos, float increment );
 
+    // Controller navigation: move active video by delta column/row in the grid
+    void navigateActive( int dc, int dr );
+    // Select the currently active video (as if double-clicked)
+    void selectActive();
+    // Zoom around the screen center (positive = in, negative = out)
+    void zoom( float increment );
+
     void setSelectionCallback(SelectionCallback callback) { mSelectionCallback = callback; }
 
     bool hasHoveredVideo() const;
@@ -63,6 +70,7 @@ private:
     void loadThumbnail(VideoItem& item);
     void calculateThumbnailRects();
     void updateHoverState(const ci::ivec2& mousePos);
+    void setActiveIndex(int index);
     void selectVideo(int index);
     void navigateToDirectory(const std::string& dirPath);
     
@@ -88,7 +96,7 @@ private:
     static constexpr float ANIM_DURATION = 0.5f;
 
     SelectionCallback mSelectionCallback;
-    int mHoveredIndex{ -1 };
+    int mActiveIndex{ -1 };
     float mScrollOffset{ 0.0f };
     ci::vec2 mLastMousePos{ 0.0f };
     std::chrono::system_clock::time_point mLastClickTime;
@@ -97,5 +105,5 @@ private:
 
 inline bool GalleryView::hasHoveredVideo() const
 {
-    return ( mHoveredIndex != -1 );
+    return ( mActiveIndex != -1 );
 }
