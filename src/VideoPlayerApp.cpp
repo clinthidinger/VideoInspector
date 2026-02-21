@@ -156,6 +156,7 @@ private:
     float mActionDisplayTimer{ 0.0f };
 
     void setControllerAction( const std::string &action ) { mLastControllerAction = action; mActionDisplayTimer = 3.0f; invalidate(); }
+    bool mScrollToSelected{ false };
     bool mDoShowDownloaderDlg{ false };
     DownloadModel mDownloadModel;
 
@@ -234,11 +235,22 @@ void VideoPlayerApp::setup()
     mGalleryView.setSelectionCallback( [this]( const std::string& videoPath ) {
         loadMovie( videoPath );
         resetPanZoom();
-        if( mMovie )
+        if( mMovie ) mMovie->play();
+
+        // Sync the directory list and scroll to the selected video
+        mFileMode = FileMode::Directory;
+        mPath = std::filesystem::path( videoPath ).parent_path().string();
+        if( loadMoviesInDir() )
         {
-            mMovie->play();
+            auto filename = std::filesystem::path( videoPath ).filename().string();
+            auto it = std::find( mVideoFilePaths.begin(), mVideoFilePaths.end(), filename );
+            if( it != mVideoFilePaths.end() )
+            {
+                mSelectedVideoIndex = static_cast<int>( std::distance( mVideoFilePaths.begin(), it ) );
+                mScrollToSelected = true;
+            }
         }
-         invalidate();
+        invalidate();
     } );
 
     ClipboardMonitor::getInstance();// setup Clipboard monitor.
@@ -529,11 +541,16 @@ void VideoPlayerApp::updateGui()
 
         // List box with all video files
         ImGui::BeginChild( "VideoListBox", ImVec2( 0, ImGui::GetFontSize() * 7 ), true );
-        for( int i = 0; i < mVideoFilePaths.size(); i++ ) 
+        for( int i = 0; i < (int)mVideoFilePaths.size(); i++ )
         {
             if( ImGui::Selectable( mVideoFilePaths[i].c_str(), mSelectedVideoIndex == i ) )
             {
                 loadMovie( i );
+            }
+            if( mScrollToSelected && mSelectedVideoIndex == i )
+            {
+                ImGui::SetScrollHereY( 0.5f );
+                mScrollToSelected = false;
             }
         }
         ImGui::EndChild();
@@ -773,10 +790,12 @@ void VideoPlayerApp::updateGui()
     if( mActionDisplayTimer > 0.0f )
     {
         auto* dl = ImGui::GetForegroundDrawList();
-        ImVec2 textSize = ImGui::CalcTextSize( mLastControllerAction.c_str() );
-        ImVec2 pos( ( ci::app::getWindowWidth()  - textSize.x ) * 0.5f,
-                      ci::app::getWindowHeight() - 80.0f );
-        dl->AddText( mFont, static_cast<float>( mFontSize ), pos,
+        const float renderSize = static_cast<float>( mFontSize * 8 );
+        const float scale      = renderSize / static_cast<float>( mFontSize );
+        ImVec2 textSize        = ImGui::CalcTextSize( mLastControllerAction.c_str() );
+        ImVec2 pos( ( ci::app::getWindowWidth()  - textSize.x * scale ) * 0.5f,
+                      ci::app::getWindowHeight() - mFontSize * 10 );
+        dl->AddText( mFont, renderSize, pos,
                      IM_COL32( 255, 255, 255, 255 ), mLastControllerAction.c_str() );
     }
 }
@@ -1342,11 +1361,18 @@ void VideoPlayerApp::checkControllerInput( float dt )
     }
     else
     {
-        // D-pad up/down: previous/next video
+        // D-pad up/down: previous/next video   D-pad left: seek to beginning
         if( mController.IsButtonDown( Btn::DpadUp ) )   { prevVideo(); setControllerAction( "Prev Video" ); }
         if( mController.IsButtonDown( Btn::DpadDown ) )  { nextVideo(); setControllerAction( "Next Video" ); }
+        if( mController.IsButtonDown( Btn::DpadLeft ) && mMovie ) { seekToFrame( 0 ); setControllerAction( "Restart" ); }
 
-        // R3: toggle loop
+        // L3: toggle repeat   R3: toggle loop
+        if( mController.IsButtonDown( Btn::L3 ) )
+        {
+            mDoesRepeat = !mDoesRepeat;
+            if( mDoesRepeat ) mDoesLoop = false;
+            setControllerAction( mDoesRepeat ? "Repeat On" : "Repeat Off" );
+        }
         if( mController.IsButtonDown( Btn::R3 ) )
         {
             mDoesLoop = !mDoesLoop;
