@@ -77,6 +77,7 @@ public:
     static void prepareSettings( Settings *settings );
 
     void setup() override;
+    void cleanup() override;
     void setupIcon();
     void draw() override;
     void resize() override;
@@ -117,6 +118,8 @@ private:
     void makeThumbnails( const std::string &dir );
     void openGallery();
     void checkControllerInput( float dt );
+    void saveSettings();
+    void loadSettings();
 
     enum class FileMode { File, Directory };
     FileMode mFileMode{ FileMode::File };
@@ -157,6 +160,8 @@ private:
 
     void setControllerAction( const std::string &action ) { mLastControllerAction = action; mActionDisplayTimer = 3.0f; invalidate(); }
     bool mScrollToSelected{ false };
+    int  mPendingLoopStartFrame{ -1 };
+    int  mPendingLoopEndFrame{ -1 };
     bool mDoShowDownloaderDlg{ false };
     DownloadModel mDownloadModel;
 
@@ -252,6 +257,8 @@ void VideoPlayerApp::setup()
         }
         invalidate();
     } );
+
+    loadSettings();
 
     ClipboardMonitor::getInstance();// setup Clipboard monitor.
 
@@ -1086,7 +1093,9 @@ void VideoPlayerApp::loadMovie( const std::string &movieFilePath )
     mIsReadyConn = mMovie->getIsReadySignal().connect( [this, wasPlaying] () {
         resetPanZoom();
         mTotalFrameCount = mMovie->getFrameCount();
-        mLoopEndFrame = mTotalFrameCount;
+        if( mPendingLoopStartFrame >= 0 ) { mLoopStartFrame = mPendingLoopStartFrame; mPendingLoopStartFrame = -1; }
+        if( mPendingLoopEndFrame   >= 0 ) { mLoopEndFrame   = mPendingLoopEndFrame;   mPendingLoopEndFrame   = -1; }
+        else                              { mLoopEndFrame   = mTotalFrameCount; }
         mMovie->setRate( mRate );
         if( wasPlaying )
         {
@@ -1461,6 +1470,83 @@ void VideoPlayerApp::checkControllerInput( float dt )
                 }
             }
         }
+    }
+}
+
+static std::filesystem::path getSettingsPath()
+{
+    auto path = ci::app::getAppPath() / "settings.ini";
+    return path;
+}
+
+void VideoPlayerApp::cleanup()
+{
+    saveSettings();
+}
+
+void VideoPlayerApp::saveSettings()
+{
+    std::ofstream f( getSettingsPath().string() );
+    if( !f.is_open() ) return;
+
+    f << "fileMode="        << static_cast<int>( mFileMode )  << "\n";
+    f << "path="            << mPath                           << "\n";
+    f << "selectedIndex="   << mSelectedVideoIndex             << "\n";
+    f << "doesLoop="        << static_cast<int>( mDoesLoop )   << "\n";
+    f << "doesRepeat="      << static_cast<int>( mDoesRepeat ) << "\n";
+    f << "loopStartFrame="  << mLoopStartFrame                 << "\n";
+    f << "loopEndFrame="    << mLoopEndFrame                   << "\n";
+    f << "rate="            << mRate                           << "\n";
+}
+
+void VideoPlayerApp::loadSettings()
+{
+    std::ifstream f( getSettingsPath().string() );
+    if( !f.is_open() ) return;
+
+    std::string line;
+    int savedLoopStart = 0, savedLoopEnd = -1;
+    while( std::getline( f, line ) )
+    {
+        auto pos = line.find( '=' );
+        if( pos == std::string::npos ) continue;
+        auto key = line.substr( 0, pos );
+        auto val = line.substr( pos + 1 );
+        if( val.empty() ) continue;
+
+        try
+        {
+            if     ( key == "fileMode"       ) mFileMode         = static_cast<FileMode>( std::stoi( val ) );
+            else if( key == "path"           ) mPath             = val;
+            else if( key == "selectedIndex"  ) mSelectedVideoIndex = std::stoi( val );
+            else if( key == "doesLoop"       ) mDoesLoop         = std::stoi( val ) != 0;
+            else if( key == "doesRepeat"     ) mDoesRepeat       = std::stoi( val ) != 0;
+            else if( key == "loopStartFrame" ) savedLoopStart    = std::stoi( val );
+            else if( key == "loopEndFrame"   ) savedLoopEnd      = std::stoi( val );
+            else if( key == "rate"           ) mRate             = std::stof( val );
+        }
+        catch( ... ) {}
+    }
+
+    // Queue loop frame restoration — applied in the isReady callback after frame count is known
+    mPendingLoopStartFrame = savedLoopStart;
+    mPendingLoopEndFrame   = savedLoopEnd;
+
+    // Restore last video
+    if( mFileMode == FileMode::Directory && !mPath.empty() && std::filesystem::is_directory( mPath ) )
+    {
+        if( loadMoviesInDir() )
+        {
+            int idx = std::clamp( mSelectedVideoIndex, 0, static_cast<int>( mVideoFilePaths.size() ) - 1 );
+            loadMovie( idx );
+            mScrollToSelected = true;
+        }
+    }
+    else if( mFileMode == FileMode::File && !mPath.empty() && std::filesystem::is_regular_file( mPath ) )
+    {
+        mVideoFilePaths = { mPath };
+        mSelectedVideoIndex = 0;
+        loadMovie( mPath );
     }
 }
 
