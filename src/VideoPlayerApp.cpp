@@ -120,6 +120,7 @@ private:
     void checkControllerInput( float dt );
     void saveSettings();
     void loadSettings();
+    void drawTimeline();
 
     enum class FileMode { File, Directory };
     FileMode mFileMode{ FileMode::File };
@@ -164,6 +165,7 @@ private:
     int  mPendingLoopEndFrame{ -1 };
     bool mDoShowDownloaderDlg{ false };
     DownloadModel mDownloadModel;
+    bool mIsDraggingTimeline{ false };
 
 #ifndef CINDER_MSW
     std::atomic_bool mIsSeeking{ false };
@@ -805,6 +807,154 @@ void VideoPlayerApp::updateGui()
         dl->AddText( mFont, renderSize, pos,
                      IM_COL32( 255, 255, 255, 255 ), mLastControllerAction.c_str() );
     }
+
+    drawTimeline();
+}
+
+void VideoPlayerApp::drawTimeline()
+{
+    if( !mMovie ) return;
+
+    const float winW = static_cast<float>( ci::app::getWindowWidth() );
+    const float winH = static_cast<float>( ci::app::getWindowHeight() );
+
+    static constexpr float PanelH     = 72.0f;  // total panel height
+    static constexpr float BarPad     = 20.0f;  // left/right padding
+    static constexpr float BarRelY    = 22.0f;  // bar centre Y inside panel
+    static constexpr float CurrTickH  = 16.0f;  // half-height of current-time tick
+    static constexpr float LoopTickH  = 12.0f;  // half-height of loop ticks
+    static constexpr float BtnRelY    = 44.0f;  // play/pause button top Y inside panel
+
+    ImGui::SetNextWindowPos( ImVec2( 0.0f, winH - PanelH ), ImGuiCond_Always );
+    ImGui::SetNextWindowSize( ImVec2( winW, PanelH ), ImGuiCond_Always );
+    ImGui::SetNextWindowBgAlpha( 0.0f );
+
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar             |
+        ImGuiWindowFlags_NoScrollbar            |
+        ImGuiWindowFlags_NoMove                 |
+        ImGuiWindowFlags_NoResize               |
+        ImGuiWindowFlags_NoSavedSettings        |
+        ImGuiWindowFlags_NoBringToFrontOnFocus  |
+        ImGuiWindowFlags_NoFocusOnAppearing;
+
+    ImGui::Begin( "##Timeline", nullptr, flags );
+
+    const float barX0 = BarPad;
+    const float barX1 = winW - BarPad;
+    const float barW  = barX1 - barX0;
+
+    auto frameToLocal = [&]( int64_t frame ) -> float
+    {
+        if( mTotalFrameCount <= 0 ) return barX0;
+        return barX0 + static_cast<float>( frame ) / static_cast<float>( mTotalFrameCount ) * barW;
+    };
+
+    auto xToFrame = [&]( float localX ) -> int64_t
+    {
+        if( mTotalFrameCount <= 0 ) return 0;
+        float t = ( localX - barX0 ) / barW;
+        t = ci::clamp( t, 0.0f, 1.0f );
+        return static_cast<int64_t>( t * static_cast<float>( mTotalFrameCount ) );
+    };
+
+    // Invisible hit area for scrubbing
+    ImGui::SetCursorPos( ImVec2( barX0, BarRelY - CurrTickH ) );
+    ImGui::InvisibleButton( "##Scrub", ImVec2( barW, CurrTickH * 2.0f ) );
+
+    if( ImGui::IsItemActive() )
+    {
+        const float mouseLocalX = ImGui::GetIO().MousePos.x - ImGui::GetWindowPos().x;
+        seekToFrame( xToFrame( mouseLocalX ) );
+        mIsDraggingTimeline = true;
+        invalidate();
+    }
+    else
+    {
+        mIsDraggingTimeline = false;
+    }
+
+    // ---- Draw via window draw list (screen coords) ----
+    ImDrawList* dl      = ImGui::GetWindowDrawList();
+    const ImVec2 winPos = ImGui::GetWindowPos();
+
+    const float sBarY   = winPos.y + BarRelY;
+    const float sBarX0  = winPos.x + barX0;
+    const float sBarX1  = winPos.x + barX1;
+    const float sCurrX  = winPos.x + frameToLocal( mFrameNumber );
+    const float sLoopSX = winPos.x + frameToLocal( mLoopStartFrame );
+    const float sLoopEX = winPos.x + frameToLocal( mLoopEndFrame );
+
+    // Transparent white fill from bar start to current-time tick (played region)
+    dl->AddRectFilled(
+        ImVec2( sBarX0, sBarY - 4.0f ),
+        ImVec2( sCurrX, sBarY + 4.0f ),
+        IM_COL32( 255, 255, 255, 50 )
+    );
+
+    // Transparent blue fill over loop region (brighter when loop enabled)
+    if( sLoopSX < sLoopEX )
+    {
+        const ImU32 loopFill = mDoesLoop
+            ? IM_COL32( 30, 110, 255, 80 )
+            : IM_COL32( 30, 110, 255, 35 );
+        dl->AddRectFilled(
+            ImVec2( sLoopSX, sBarY - 6.0f ),
+            ImVec2( sLoopEX, sBarY + 6.0f ),
+            loopFill
+        );
+    }
+
+    // Base white timeline bar
+    dl->AddLine(
+        ImVec2( sBarX0, sBarY ),
+        ImVec2( sBarX1, sBarY ),
+        IM_COL32( 255, 255, 255, 180 ),
+        2.0f
+    );
+
+    // Loop start tick (blue)
+    dl->AddLine(
+        ImVec2( sLoopSX, sBarY - LoopTickH ),
+        ImVec2( sLoopSX, sBarY + LoopTickH ),
+        IM_COL32( 30, 120, 255, 230 ),
+        2.0f
+    );
+
+    // Loop end tick (orange)
+    dl->AddLine(
+        ImVec2( sLoopEX, sBarY - LoopTickH ),
+        ImVec2( sLoopEX, sBarY + LoopTickH ),
+        IM_COL32( 255, 140, 0, 230 ),
+        2.0f
+    );
+
+    // Current-time tick (white, tallest)
+    dl->AddLine(
+        ImVec2( sCurrX, sBarY - CurrTickH ),
+        ImVec2( sCurrX, sBarY + CurrTickH ),
+        IM_COL32( 255, 255, 255, 255 ),
+        3.0f
+    );
+
+    // Play/Pause button centred below the bar
+    ImGui::PushFont( mFontAwesomeTweaked );
+    constexpr const char* PlayStr  = "d";
+    constexpr const char* PauseStr = "e";
+    const char* btnLabel = mMovie->isPlaying() ? PauseStr : PlayStr;
+    const float btnW = ImGui::CalcTextSize( btnLabel ).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SetCursorPos( ImVec2( winW * 0.5f - btnW * 0.5f, BtnRelY ) );
+    if( ImGui::Button( btnLabel ) )
+    {
+        if( mMovie->isPlaying() )
+            mMovie->pause();
+        else
+            mMovie->play();
+        invalidate();
+    }
+    ImGui::PopFont();
+
+    ImGui::End();
 }
 
 void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
@@ -893,6 +1043,11 @@ void VideoPlayerApp::mouseDown( ci::app::MouseEvent event )
         resetPanZoom();
     }
 
+    if( ImGui::GetIO().WantCaptureMouse )
+    {
+        return;
+    }
+
     if( isInCameraFrame( pos ) && !isInVideoFrame( pos ) )
     {
         mCamFrameTransform.mouseDown( pos );
@@ -911,6 +1066,11 @@ void VideoPlayerApp::mouseDrag( ci::app::MouseEvent event )
     if( mGalleryView.isOpen() )
     {
         mGalleryView.mouseDrag( event.getPos() );
+        return;
+    }
+
+    if( mIsDraggingTimeline || ImGui::GetIO().WantCaptureMouse )
+    {
         return;
     }
 
