@@ -204,6 +204,83 @@ void VideoPlayerApp::prepareSettings( Settings *settings )
 #endif
 }
 
+static void applyImGuiStyle()
+{
+    ImGuiStyle& s = ImGui::GetStyle();
+
+    // --- Shape ---
+    s.WindowRounding    = 6.0f;
+    s.ChildRounding     = 4.0f;
+    s.FrameRounding     = 4.0f;
+    s.PopupRounding     = 4.0f;
+    s.ScrollbarRounding = 4.0f;
+    s.GrabRounding      = 3.0f;
+    s.TabRounding       = 4.0f;
+    s.WindowBorderSize  = 1.0f;
+    s.FrameBorderSize   = 0.0f;
+    s.TabBorderSize     = 0.0f;
+
+    // --- Spacing ---
+    s.WindowPadding  = ImVec2( 12.0f, 10.0f );
+    s.FramePadding   = ImVec2(  8.0f,  4.0f );
+    s.ItemSpacing    = ImVec2(  8.0f,  6.0f );
+    s.ItemInnerSpacing = ImVec2( 6.0f, 4.0f );
+    s.IndentSpacing  = 16.0f;
+    s.ScrollbarSize  = 10.0f;
+    s.GrabMinSize    = 10.0f;
+
+    // --- Colors ---
+    ImVec4* c = s.Colors;
+    c[ImGuiCol_Text]                  = ImVec4( 0.90f, 0.90f, 0.93f, 1.00f );
+    c[ImGuiCol_TextDisabled]          = ImVec4( 0.40f, 0.40f, 0.46f, 1.00f );
+    c[ImGuiCol_WindowBg]              = ImVec4( 0.10f, 0.10f, 0.13f, 0.94f );
+    c[ImGuiCol_ChildBg]               = ImVec4( 0.10f, 0.10f, 0.13f, 0.00f );
+    c[ImGuiCol_PopupBg]               = ImVec4( 0.12f, 0.12f, 0.16f, 0.96f );
+    c[ImGuiCol_Border]                = ImVec4( 0.28f, 0.28f, 0.36f, 0.60f );
+    c[ImGuiCol_BorderShadow]          = ImVec4( 0.00f, 0.00f, 0.00f, 0.00f );
+    c[ImGuiCol_FrameBg]               = ImVec4( 0.17f, 0.17f, 0.22f, 1.00f );
+    c[ImGuiCol_FrameBgHovered]        = ImVec4( 0.22f, 0.22f, 0.28f, 1.00f );
+    c[ImGuiCol_FrameBgActive]         = ImVec4( 0.14f, 0.38f, 0.68f, 1.00f );
+    c[ImGuiCol_TitleBg]               = ImVec4( 0.08f, 0.08f, 0.10f, 1.00f );
+    c[ImGuiCol_TitleBgActive]         = ImVec4( 0.10f, 0.27f, 0.50f, 1.00f );
+    c[ImGuiCol_TitleBgCollapsed]      = ImVec4( 0.08f, 0.08f, 0.10f, 0.75f );
+    c[ImGuiCol_MenuBarBg]             = ImVec4( 0.10f, 0.10f, 0.13f, 1.00f );
+    c[ImGuiCol_ScrollbarBg]           = ImVec4( 0.08f, 0.08f, 0.10f, 0.60f );
+    c[ImGuiCol_ScrollbarGrab]         = ImVec4( 0.28f, 0.28f, 0.36f, 1.00f );
+    c[ImGuiCol_ScrollbarGrabHovered]  = ImVec4( 0.38f, 0.38f, 0.48f, 1.00f );
+    c[ImGuiCol_ScrollbarGrabActive]   = ImVec4( 0.18f, 0.48f, 0.80f, 1.00f );
+    c[ImGuiCol_CheckMark]             = ImVec4( 0.22f, 0.62f, 0.95f, 1.00f );
+    c[ImGuiCol_SliderGrab]            = ImVec4( 0.20f, 0.54f, 0.86f, 1.00f );
+    c[ImGuiCol_SliderGrabActive]      = ImVec4( 0.14f, 0.44f, 0.76f, 1.00f );
+    c[ImGuiCol_Button]                = ImVec4( 0.16f, 0.34f, 0.58f, 0.85f );
+    c[ImGuiCol_ButtonHovered]         = ImVec4( 0.20f, 0.44f, 0.72f, 1.00f );
+    c[ImGuiCol_ButtonActive]          = ImVec4( 0.14f, 0.36f, 0.64f, 1.00f );
+    c[ImGuiCol_Header]                = ImVec4( 0.20f, 0.44f, 0.72f, 0.45f );
+    c[ImGuiCol_HeaderHovered]         = ImVec4( 0.20f, 0.44f, 0.72f, 0.80f );
+    c[ImGuiCol_HeaderActive]          = ImVec4( 0.20f, 0.44f, 0.72f, 1.00f );
+    c[ImGuiCol_Separator]             = ImVec4( 0.28f, 0.28f, 0.36f, 0.60f );
+    c[ImGuiCol_SeparatorHovered]      = ImVec4( 0.20f, 0.44f, 0.72f, 0.78f );
+    c[ImGuiCol_SeparatorActive]       = ImVec4( 0.20f, 0.44f, 0.72f, 1.00f );
+    c[ImGuiCol_ResizeGrip]            = ImVec4( 0.20f, 0.44f, 0.72f, 0.25f );
+    c[ImGuiCol_ResizeGripHovered]     = ImVec4( 0.20f, 0.44f, 0.72f, 0.67f );
+    c[ImGuiCol_ResizeGripActive]      = ImVec4( 0.20f, 0.44f, 0.72f, 0.95f );
+    c[ImGuiCol_Tab]                   = ImVec4( 0.12f, 0.22f, 0.38f, 0.86f );
+    c[ImGuiCol_TabHovered]            = ImVec4( 0.20f, 0.44f, 0.72f, 0.80f );
+    c[ImGuiCol_TabActive]             = ImVec4( 0.16f, 0.36f, 0.62f, 1.00f );
+    c[ImGuiCol_TabUnfocused]          = ImVec4( 0.10f, 0.14f, 0.22f, 0.97f );
+    c[ImGuiCol_TabUnfocusedActive]    = ImVec4( 0.13f, 0.24f, 0.42f, 1.00f );
+    c[ImGuiCol_PlotLines]             = ImVec4( 0.22f, 0.62f, 0.95f, 1.00f );
+    c[ImGuiCol_PlotLinesHovered]      = ImVec4( 0.30f, 0.78f, 1.00f, 1.00f );
+    c[ImGuiCol_PlotHistogram]         = ImVec4( 0.22f, 0.62f, 0.95f, 1.00f );
+    c[ImGuiCol_PlotHistogramHovered]  = ImVec4( 0.30f, 0.78f, 1.00f, 1.00f );
+    c[ImGuiCol_TextSelectedBg]        = ImVec4( 0.20f, 0.44f, 0.72f, 0.35f );
+    c[ImGuiCol_DragDropTarget]        = ImVec4( 0.22f, 0.62f, 0.95f, 0.90f );
+    c[ImGuiCol_NavHighlight]          = ImVec4( 0.22f, 0.62f, 0.95f, 1.00f );
+    c[ImGuiCol_NavWindowingHighlight] = ImVec4( 1.00f, 1.00f, 1.00f, 0.70f );
+    c[ImGuiCol_NavWindowingDimBg]     = ImVec4( 0.80f, 0.80f, 0.80f, 0.20f );
+    c[ImGuiCol_ModalWindowDimBg]      = ImVec4( 0.06f, 0.06f, 0.08f, 0.55f );
+}
+
 void VideoPlayerApp::setup()
 {
     getWindow()->setTitle( "Video Biter" );
@@ -212,6 +289,7 @@ void VideoPlayerApp::setup()
     mViewportTransform.reset();
     mLastMouseDownTime = std::chrono::system_clock::now();
     ImGui::Initialize();
+    applyImGuiStyle();
     auto args = getCommandLineArgs();
     if( args.size() > 1 )
     {
@@ -483,6 +561,72 @@ void VideoPlayerApp::updateGui()
 
     const int ItemWidth = 40;
     ImGui::Begin( "Controls" );
+
+    // Window decoration: gradient, glowing border, title highlight
+    {
+        ImDrawList* bgDl  = ImGui::GetWindowDrawList();
+        const ImVec2 wp   = ImGui::GetWindowPos();
+        const ImVec2 ws   = ImGui::GetWindowSize();
+        const ImVec2 br   = ImVec2( wp.x + ws.x, wp.y + ws.y );
+        const float  titH = ImGui::GetFrameHeight();
+
+        // Title bar: left-to-right blue spotlight
+        bgDl->AddRectFilledMultiColor(
+            wp, ImVec2( br.x, wp.y + titH ),
+            IM_COL32(  70, 140, 255, 120 ), IM_COL32(  10,  30,  80,  40 ),
+            IM_COL32(  10,  30,  80,  40 ), IM_COL32(  60, 120, 240, 100 ) );
+
+        // Window body: top-to-bottom blue-to-deep-navy gradient
+        bgDl->AddRectFilledMultiColor(
+            ImVec2( wp.x, wp.y + titH ), br,
+            IM_COL32(  35,  65, 140, 90 ), IM_COL32(  35,  65, 140, 90 ),
+            IM_COL32(   6,  14,  40, 120 ), IM_COL32(   6,  14,  40, 120 ) );
+
+        // Left accent bar (bright blue stripe)
+        bgDl->AddRectFilled(
+            ImVec2( wp.x, wp.y + titH ),
+            ImVec2( wp.x + 2.0f, br.y ),
+            IM_COL32( 60, 140, 255, 200 ) );
+        // Left accent glow
+        bgDl->AddRectFilledMultiColor(
+            ImVec2( wp.x + 2.0f, wp.y + titH ),
+            ImVec2( wp.x + 14.0f, br.y ),
+            IM_COL32( 60, 140, 255, 60 ), IM_COL32( 0, 0, 0, 0 ),
+            IM_COL32( 0, 0, 0, 0 ),       IM_COL32( 60, 140, 255, 60 ) );
+
+        // Border glow (two passes, outer wider and dimmer)
+        for( int gi = 3; gi >= 1; --gi )
+            bgDl->AddRect( wp, br,
+                IM_COL32( 50, 130, 230, gi * 30 ), 6.0f, 0, 1.0f + gi * 0.5f );
+
+        // Inner border highlight
+        bgDl->AddRect(
+            ImVec2( wp.x + 1.0f, wp.y + 1.0f ),
+            ImVec2( br.x - 1.0f, br.y - 1.0f ),
+            IM_COL32( 100, 170, 255, 70 ), 5.0f, 0, 1.0f );
+
+        // Top edge bright highlight
+        bgDl->AddLine(
+            ImVec2( wp.x + 6.0f,  wp.y + 1.0f ),
+            ImVec2( br.x - 6.0f,  wp.y + 1.0f ),
+            IM_COL32( 160, 210, 255, 180 ), 1.0f );
+    }
+
+    // Glowing separator helper (use in place of ImGui::Separator)
+    auto glowSep = [&]()
+    {
+        ImDrawList*  dl  = ImGui::GetWindowDrawList();
+        const float  x0  = ImGui::GetWindowPos().x + ImGui::GetStyle().WindowPadding.x;
+        const float  x1  = x0 + ImGui::GetContentRegionAvail().x;
+        const float  y   = ImGui::GetCursorScreenPos().y + 3.0f;
+        ImGui::Dummy( ImVec2( 0.0f, 6.0f ) );
+        for( int gi = 3; gi >= 1; --gi )
+            dl->AddLine( ImVec2( x0, y ), ImVec2( x1, y ),
+                IM_COL32( 50, 130, 230, gi * 22 ), 1.0f + gi * 1.5f );
+        dl->AddLine( ImVec2( x0, y ), ImVec2( x1, y ),
+            IM_COL32( 140, 190, 255, 100 ), 1.0f );
+    };
+
 #ifdef _DEBUG
     ImGui::Text( "fps: %f", ci::app::App::getAverageFps() );
 #endif
@@ -604,7 +748,7 @@ void VideoPlayerApp::updateGui()
         mDoShowDownloaderDlg = true;
     }
 
-    ImGui::Separator();
+    glowSep();
 
     ImGui::PushFont( mFontAwesomeTweaked );
     constexpr const char * const StopStr = "f";
@@ -707,6 +851,11 @@ void VideoPlayerApp::updateGui()
             );
         }
 
+        // Bar glow
+        for( int gi = 3; gi >= 1; --gi )
+            dl->AddLine( ImVec2( sBarX0, sBarY ), ImVec2( sBarX1, sBarY ),
+                IM_COL32( 60, 140, 255, gi * 16 ), 2.0f + gi * 3.0f );
+
         // Base bar line
         dl->AddLine(
             ImVec2( sBarX0, sBarY ),
@@ -715,7 +864,10 @@ void VideoPlayerApp::updateGui()
             2.0f
         );
 
-        // Loop start tick (blue)
+        // Loop start tick glow + tick
+        for( int gi = 2; gi >= 1; --gi )
+            dl->AddLine( ImVec2( sLoopSX, sBarY - LoopTickH ), ImVec2( sLoopSX, sBarY + LoopTickH ),
+                IM_COL32( 30, 120, 255, gi * 22 ), 2.0f + gi * 3.0f );
         dl->AddLine(
             ImVec2( sLoopSX, sBarY - LoopTickH ),
             ImVec2( sLoopSX, sBarY + LoopTickH ),
@@ -723,7 +875,10 @@ void VideoPlayerApp::updateGui()
             2.0f
         );
 
-        // Loop end tick (orange)
+        // Loop end tick glow + tick
+        for( int gi = 2; gi >= 1; --gi )
+            dl->AddLine( ImVec2( sLoopEX, sBarY - LoopTickH ), ImVec2( sLoopEX, sBarY + LoopTickH ),
+                IM_COL32( 255, 140, 0, gi * 22 ), 2.0f + gi * 3.0f );
         dl->AddLine(
             ImVec2( sLoopEX, sBarY - LoopTickH ),
             ImVec2( sLoopEX, sBarY + LoopTickH ),
@@ -731,7 +886,10 @@ void VideoPlayerApp::updateGui()
             2.0f
         );
 
-        // Current-time tick (white, tallest)
+        // Current-time tick glow + tick
+        for( int gi = 3; gi >= 1; --gi )
+            dl->AddLine( ImVec2( sCurrX, sBarY - CurrTickH ), ImVec2( sCurrX, sBarY + CurrTickH ),
+                IM_COL32( 160, 210, 255, gi * 14 ), 3.0f + gi * 3.0f );
         dl->AddLine(
             ImVec2( sCurrX, sBarY - CurrTickH ),
             ImVec2( sCurrX, sBarY + CurrTickH ),
@@ -799,7 +957,7 @@ void VideoPlayerApp::updateGui()
             mMovie->setRate( mRate );
         }
     }
-    ImGui::Separator();
+    glowSep();
 
     if( ImGui::CollapsingHeader( "Loop" ) )
     {
@@ -841,7 +999,7 @@ void VideoPlayerApp::updateGui()
             
             if( mEnableCamera )
             {
-                ImGui::Separator();
+                glowSep();
                 
                 if( !mIsRecording )
                 {
@@ -1024,6 +1182,11 @@ void VideoPlayerApp::drawTimeline()
         );
     }
 
+    // Bar glow
+    for( int gi = 3; gi >= 1; --gi )
+        dl->AddLine( ImVec2( sBarX0, sBarY ), ImVec2( sBarX1, sBarY ),
+            IM_COL32( 60, 140, 255, gi * 16 ), 2.0f + gi * 3.0f );
+
     // Base white timeline bar
     dl->AddLine(
         ImVec2( sBarX0, sBarY ),
@@ -1032,7 +1195,10 @@ void VideoPlayerApp::drawTimeline()
         2.0f
     );
 
-    // Loop start tick (blue)
+    // Loop start tick glow + tick
+    for( int gi = 2; gi >= 1; --gi )
+        dl->AddLine( ImVec2( sLoopSX, sBarY - LoopTickH ), ImVec2( sLoopSX, sBarY + LoopTickH ),
+            IM_COL32( 30, 120, 255, gi * 22 ), 2.0f + gi * 3.0f );
     dl->AddLine(
         ImVec2( sLoopSX, sBarY - LoopTickH ),
         ImVec2( sLoopSX, sBarY + LoopTickH ),
@@ -1040,7 +1206,10 @@ void VideoPlayerApp::drawTimeline()
         2.0f
     );
 
-    // Loop end tick (orange)
+    // Loop end tick glow + tick
+    for( int gi = 2; gi >= 1; --gi )
+        dl->AddLine( ImVec2( sLoopEX, sBarY - LoopTickH ), ImVec2( sLoopEX, sBarY + LoopTickH ),
+            IM_COL32( 255, 140, 0, gi * 22 ), 2.0f + gi * 3.0f );
     dl->AddLine(
         ImVec2( sLoopEX, sBarY - LoopTickH ),
         ImVec2( sLoopEX, sBarY + LoopTickH ),
@@ -1048,7 +1217,10 @@ void VideoPlayerApp::drawTimeline()
         2.0f
     );
 
-    // Current-time tick (white, tallest)
+    // Current-time tick glow + tick
+    for( int gi = 3; gi >= 1; --gi )
+        dl->AddLine( ImVec2( sCurrX, sBarY - CurrTickH ), ImVec2( sCurrX, sBarY + CurrTickH ),
+            IM_COL32( 160, 210, 255, gi * 14 ), 3.0f + gi * 3.0f );
     dl->AddLine(
         ImVec2( sCurrX, sBarY - CurrTickH ),
         ImVec2( sCurrX, sBarY + CurrTickH ),
@@ -1487,7 +1659,7 @@ void VideoPlayerApp::seekToFrame( int64_t frameNumber )
         {
             mIsSeeking = true;
 #endif
-            CI_LOG_I( "Seek to frame " + std::to_string( frameNumber ) );
+            //CI_LOG_I( "Seek to frame " + std::to_string( frameNumber ) );
             mMovie->seekToFrame( frameNumber );
 #ifndef CINDER_MSW
         }
