@@ -131,8 +131,6 @@ private:
     int64_t mFrameNumber{ 0 };
     int64_t mTotalFrameCount{ 0 };
     int mGotoFrame{ 0 };
-    int mSliderFrame{ 0 };
-    bool mIsSliding{ false };
     float mRate{ 1.0f };
     bool mDoesLoop{ false };
     bool mDoesRepeat{ false };
@@ -464,6 +462,21 @@ void VideoPlayerApp::invalidate()
     mRefreshCount = DefaultRefreshCount;
 }
 
+static std::string formatTime( int64_t frame, float fps )
+{
+    if( fps <= 0.0f ) return "0:00";
+    const int totalSecs = static_cast<int>( static_cast<float>( frame ) / fps );
+    const int h = totalSecs / 3600;
+    const int m = ( totalSecs % 3600 ) / 60;
+    const int s = totalSecs % 60;
+    char buf[16];
+    if( h > 0 )
+        snprintf( buf, sizeof( buf ), "%d:%02d:%02d", h, m, s );
+    else
+        snprintf( buf, sizeof( buf ), "%d:%02d", m, s );
+    return buf;
+}
+
 void VideoPlayerApp::updateGui()
 {
     ImGui::SetCurrentFont( mFont );
@@ -635,19 +648,125 @@ void VideoPlayerApp::updateGui()
         nextFrame();
     }
     ImGui::PopFont();
-    mSliderFrame = mMovie ? mMovie->getCurrentFrame() : 0;
-    ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x );// -( ImGui::GetFontSize() * 4.5f ) );
-    if( ImGui::SliderInt( "TimeLine", &mSliderFrame, 0, mTotalFrameCount ) )
+    // Custom timeline bar matching the bottom overlay style
     {
-        seekToFrame( mSliderFrame );
-        mIsSliding = true;
+        static constexpr float BarH      = 36.0f;
+        static constexpr float BarRelY   = 12.0f;
+        static constexpr float CurrTickH = 10.0f;
+        static constexpr float LoopTickH =  8.0f;
+
+        const float barW = ImGui::GetContentRegionAvail().x;
+        const ImVec2 cursor = ImGui::GetCursorScreenPos();
+
+        ImGui::InvisibleButton( "##ScrubCtrl", ImVec2( barW, BarH ) );
+        if( ImGui::IsItemActive() )
+        {
+            float t = ( ImGui::GetIO().MousePos.x - cursor.x ) / barW;
+            t = ci::clamp( t, 0.0f, 1.0f );
+            seekToFrame( static_cast<int64_t>( t * static_cast<float>( mTotalFrameCount ) ) );
+            mIsDraggingTimeline = true;
+            invalidate();
+        }
+        else
+        {
+            mIsDraggingTimeline = false;
+        }
+
+        ImDrawList* dl      = ImGui::GetWindowDrawList();
+        const float sBarY   = cursor.y + BarRelY;
+        const float sBarX0  = cursor.x;
+        const float sBarX1  = cursor.x + barW;
+
+        auto frameToX = [&]( int64_t frame ) -> float
+        {
+            if( mTotalFrameCount <= 0 ) return sBarX0;
+            return sBarX0 + static_cast<float>( frame ) / static_cast<float>( mTotalFrameCount ) * barW;
+        };
+
+        const float sCurrX  = frameToX( mFrameNumber );
+        const float sLoopSX = frameToX( mLoopStartFrame );
+        const float sLoopEX = frameToX( mLoopEndFrame );
+
+        // Played region
+        dl->AddRectFilled(
+            ImVec2( sBarX0, sBarY - 4.0f ),
+            ImVec2( sCurrX, sBarY + 4.0f ),
+            IM_COL32( 255, 255, 255, 50 )
+        );
+
+        // Loop region fill
+        if( sLoopSX < sLoopEX )
+        {
+            const ImU32 loopFill = mDoesLoop
+                ? IM_COL32( 30, 110, 255, 80 )
+                : IM_COL32( 30, 110, 255, 35 );
+            dl->AddRectFilled(
+                ImVec2( sLoopSX, sBarY - 6.0f ),
+                ImVec2( sLoopEX, sBarY + 6.0f ),
+                loopFill
+            );
+        }
+
+        // Base bar line
+        dl->AddLine(
+            ImVec2( sBarX0, sBarY ),
+            ImVec2( sBarX1, sBarY ),
+            IM_COL32( 255, 255, 255, 180 ),
+            2.0f
+        );
+
+        // Loop start tick (blue)
+        dl->AddLine(
+            ImVec2( sLoopSX, sBarY - LoopTickH ),
+            ImVec2( sLoopSX, sBarY + LoopTickH ),
+            IM_COL32( 30, 120, 255, 230 ),
+            2.0f
+        );
+
+        // Loop end tick (orange)
+        dl->AddLine(
+            ImVec2( sLoopEX, sBarY - LoopTickH ),
+            ImVec2( sLoopEX, sBarY + LoopTickH ),
+            IM_COL32( 255, 140, 0, 230 ),
+            2.0f
+        );
+
+        // Current-time tick (white, tallest)
+        dl->AddLine(
+            ImVec2( sCurrX, sBarY - CurrTickH ),
+            ImVec2( sCurrX, sBarY + CurrTickH ),
+            IM_COL32( 255, 255, 255, 255 ),
+            3.0f
+        );
+
+        // Time labels
+        if( mMovie )
+        {
+            static constexpr float LabelSize = 16.0f;
+            const float fps = mMovie->getFramerate();
+            const std::string startStr = formatTime( 0, fps );
+            const std::string endStr   = formatTime( mTotalFrameCount, fps );
+            const std::string currStr  = formatTime( mFrameNumber, fps );
+
+            // Start time — below bar, left-aligned
+            dl->AddText( mFont, LabelSize,
+                ImVec2( sBarX0, sBarY + 4.0f ),
+                IM_COL32( 255, 255, 255, 160 ), startStr.c_str() );
+
+            // End time — below bar, right-aligned
+            const float endW = mFont->CalcTextSizeA( LabelSize, FLT_MAX, 0.0f, endStr.c_str() ).x;
+            dl->AddText( mFont, LabelSize,
+                ImVec2( sBarX1 - endW, sBarY + 4.0f ),
+                IM_COL32( 255, 255, 255, 160 ), endStr.c_str() );
+
+            // Current time — above the tick, clamped within bar
+            const float currW = mFont->CalcTextSizeA( LabelSize, FLT_MAX, 0.0f, currStr.c_str() ).x;
+            const float currLabelX = ci::clamp( sCurrX - currW * 0.5f, sBarX0, sBarX1 - currW );
+            dl->AddText( mFont, LabelSize,
+                ImVec2( currLabelX, sBarY + CurrTickH + 6.0f ),
+                IM_COL32( 255, 255, 255, 220 ), currStr.c_str() );
+        }
     }
-#ifndef CINDER_MSW
-    if( !mIsSeeking )
-    {
-        mSliderFrame = mFrameNumber;
-    }
-#endif
 
     ImGui::Text( "Frame Count: %ld", mTotalFrameCount );
 
@@ -937,6 +1056,33 @@ void VideoPlayerApp::drawTimeline()
         3.0f
     );
 
+    // Time labels
+    {
+        static constexpr float LabelSize = 16.0f;
+        const float fps = mMovie->getFramerate();
+        const std::string startStr = formatTime( 0, fps );
+        const std::string endStr   = formatTime( mTotalFrameCount, fps );
+        const std::string currStr  = formatTime( mFrameNumber, fps );
+
+        // Start time — below bar, left-aligned
+        dl->AddText( mFont, LabelSize,
+            ImVec2( sBarX0, sBarY + 4.0f ),
+            IM_COL32( 255, 255, 255, 160 ), startStr.c_str() );
+
+        // End time — below bar, right-aligned
+        const float endW = mFont->CalcTextSizeA( LabelSize, FLT_MAX, 0.0f, endStr.c_str() ).x;
+        dl->AddText( mFont, LabelSize,
+            ImVec2( sBarX1 - endW, sBarY + 4.0f ),
+            IM_COL32( 255, 255, 255, 160 ), endStr.c_str() );
+
+        // Current time — above the tick, clamped within bar
+        const float currW = mFont->CalcTextSizeA( LabelSize, FLT_MAX, 0.0f, currStr.c_str() ).x;
+        const float currLabelX = ci::clamp( sCurrX - currW * 0.5f, sBarX0, sBarX1 - currW );
+        dl->AddText( mFont, LabelSize,
+            ImVec2( currLabelX, sBarY + CurrTickH + 6.0f ),
+            IM_COL32( 255, 255, 255, 220 ), currStr.c_str() );
+    }
+
     // Play/Pause button centred below the bar
     ImGui::PushFont( mFontAwesomeTweaked );
     constexpr const char* PlayStr  = "d";
@@ -976,9 +1122,16 @@ void VideoPlayerApp::keyDown( ci::app::KeyEvent event )
     }
 
     if( event.getCode() == ci::app::KeyEvent::KEY_g )
-    { 
+    {
         openGallery();
     }
+
+    if( mGalleryView.isOpen() )
+    {
+        mGalleryView.keyDown( event );
+        return;
+    }
+
     if( mMovie == nullptr )
     {
         return;
@@ -1106,7 +1259,7 @@ void VideoPlayerApp::mouseWheel( ci::app::MouseEvent event )
     // Handle gallery mouse wheel if gallery is open
     if( mGalleryView.isOpen() )
     {
-        mGalleryView.mouseWheel( pos, event.getWheelIncrement() );
+        mGalleryView.mouseWheel( pos, event.getWheelIncrement(), event.isControlDown() );
         return;
     }
 

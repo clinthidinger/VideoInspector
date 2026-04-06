@@ -99,7 +99,7 @@ void GalleryView::loadVideosFromDirectory(const std::string& dirPath)
         // Sort subdirectories and videos alphabetically
         std::sort(mSubdirectories.begin(), mSubdirectories.end());
 
-        calculateThumbnailRects();
+        fitToWindow( ci::app::getWindowSize() );
     }
     catch (const fs::filesystem_error& e)
     {
@@ -167,7 +167,7 @@ ci::gl::TextureRef GalleryView::loadWindowsThumbnail(const std::filesystem::path
             if (SUCCEEDED(hr))
             {
                 // Request thumbnail size
-                int thumbSize = static_cast<int>(THUMBNAIL_SIZE * 1.5f); // Request larger for better quality
+                int thumbSize = static_cast<int>(mThumbnailSize * 1.5f); // Request larger for better quality
                 SIZE size = { thumbSize, thumbSize };
                 HBITMAP hBitmap = nullptr;
 
@@ -274,22 +274,58 @@ void GalleryView::calculateThumbnailRects()
 
     for (size_t i = 0; i < mVideos.size(); i++)
     {
-        int row = i / THUMBNAILS_PER_ROW;
-        int col = i % THUMBNAILS_PER_ROW;
+        int row = i / mThumbnailsPerRow;
+        int col = i % mThumbnailsPerRow;
 
-        float x = THUMBNAIL_SPACING + col * (THUMBNAIL_SIZE + THUMBNAIL_SPACING);
-        float y = startY + THUMBNAIL_SPACING + row * (THUMBNAIL_SIZE + THUMBNAIL_SPACING);
+        float x = THUMBNAIL_SPACING + col * (mThumbnailSize + THUMBNAIL_SPACING);
+        float y = startY + THUMBNAIL_SPACING + row * (mThumbnailSize + THUMBNAIL_SPACING);
 
-        mVideos[i].rect = ci::Rectf(x, y, x + THUMBNAIL_SIZE, y + THUMBNAIL_SIZE);
+        mVideos[i].rect = ci::Rectf(x, y, x + mThumbnailSize, y + mThumbnailSize);
 
         // Calculate expanded rect (centered expansion)
-        float expandedSize = THUMBNAIL_SIZE * HOVER_SCALE;
-        float offset = (expandedSize - THUMBNAIL_SIZE) / 2.0f;
+        float expandedSize = mThumbnailSize * HOVER_SCALE;
+        float offset = (expandedSize - mThumbnailSize) / 2.0f;
         mVideos[i].expandedRect = ci::Rectf(
             x - offset, y - offset,
-            x + THUMBNAIL_SIZE + offset, y + THUMBNAIL_SIZE + offset
+            x + mThumbnailSize + offset, y + mThumbnailSize + offset
         );
     }
+}
+
+void GalleryView::fitToWindow(const ci::ivec2& windowSize)
+{
+    if( mVideos.empty() )
+    {
+        calculateThumbnailRects();
+        return;
+    }
+
+    const float availW = static_cast<float>( windowSize.x );
+    const float availH = static_cast<float>( windowSize.y ) - GALLERY_TOP_MARGIN;
+    const int N = static_cast<int>( mVideos.size() );
+
+    float bestSize = 0.0f;
+    int bestCols = 1;
+
+    for( int cols = 1; cols <= N; ++cols )
+    {
+        const int rows = ( N + cols - 1 ) / cols;
+        const float thumbW = ( availW - THUMBNAIL_SPACING * ( cols + 1 ) ) / cols;
+        const float thumbH = ( availH - THUMBNAIL_SPACING * ( rows + 1 ) ) / rows;
+        const float thumbSize = std::min( thumbW, thumbH );
+
+        if( thumbSize > bestSize )
+        {
+            bestSize  = thumbSize;
+            bestCols  = cols;
+        }
+    }
+
+    mThumbnailSize   = std::max( bestSize, 40.0f );
+    mThumbnailsPerRow = bestCols;
+
+    calculateThumbnailRects();
+    mTransform.reset();
 }
 
 void GalleryView::update()
@@ -329,7 +365,7 @@ void GalleryView::update()
     */
 }
 
-void GalleryView::setActiveIndex(int newIndex)
+void GalleryView::setActiveIndex(int newIndex, bool centerView)
 {
     if( newIndex == mActiveIndex ) return;
 
@@ -371,11 +407,14 @@ void GalleryView::setActiveIndex(int newIndex)
         }
         ci::app::timeline().apply( &newVid.scale, HOVER_SCALE, ANIM_DURATION );
 
-        // Pan so the active item is near the screen center
-        ci::vec2 contentCenter  = mVideos[newIndex].rect.getCenter();
-        ci::vec2 currentOnScreen = ci::vec2( mTransform.getMatrix() * ci::vec4( contentCenter, 0.0f, 1.0f ) );
-        ci::vec2 delta           = ci::app::getWindowCenter() - currentOnScreen;
-        mTransform.setTranslation( mTransform.getTranslation() + delta );
+        if( centerView )
+        {
+            // Pan so the active item is near the screen center
+            ci::vec2 contentCenter   = mVideos[newIndex].rect.getCenter();
+            ci::vec2 currentOnScreen = ci::vec2( mTransform.getMatrix() * ci::vec4( contentCenter, 0.0f, 1.0f ) );
+            ci::vec2 delta           = ci::app::getWindowCenter() - currentOnScreen;
+            mTransform.setTranslation( mTransform.getTranslation() + delta );
+        }
     }
 
     mActiveIndex = newIndex;
@@ -403,9 +442,9 @@ void GalleryView::navigateActive( int dc, int dr )
     if( mVideos.empty() ) return;
 
     int startIdx = ( mActiveIndex >= 0 ) ? mActiveIndex : 0;
-    int newIdx = startIdx + dc + dr * THUMBNAILS_PER_ROW;
+    int newIdx = startIdx + dc + dr * mThumbnailsPerRow;
     newIdx = std::clamp( newIdx, 0, static_cast<int>( mVideos.size() ) - 1 );
-    setActiveIndex( newIdx );
+    setActiveIndex( newIdx, /*centerView=*/true );
 }
 
 void GalleryView::selectActive()
@@ -583,7 +622,8 @@ void GalleryView::draw()
 
 void GalleryView::resize( const ci::ivec2 &size )
 {
-
+    if( !mIsOpen ) return;
+    fitToWindow( size );
 }
 
 ci::Rectf GalleryView::getCenteredRect( const ci::Rectf &r, const ci::vec2 &size )
@@ -693,26 +733,61 @@ void GalleryView::mouseMove(const ci::ivec2& pos)
     updateHoverState(pos);
 }
 
-void GalleryView::mouseWheel(const ci::ivec2& pos, float increment)
+void GalleryView::mouseWheel(const ci::ivec2& pos, float increment, bool ctrlDown)
 {
     if (!mIsOpen)
     {
         return;
     }
 
-    // Scroll the gallery
-    //mScrollOffset -= increment * 20.0f;
-    //mScrollOffset = std::max(0.0f, mScrollOffset);
+    if( ctrlDown )
+    {
+        // Ctrl+scroll (or trackpad pinch) → zoom
+        mTransform.mouseWheel( pos, increment );
+    }
+    else
+    {
+        // Plain scroll → pan vertically
+        static constexpr float PanStep = 60.0f;
+        mTransform.pan( ci::vec2( 0.0f, increment * PanStep ) );
+        updateHoverState( pos );
+    }
+}
 
-    // Update hover state after scrolling
-    updateHoverState(pos);
+void GalleryView::keyDown( const ci::app::KeyEvent& event )
+{
+    if( !mIsOpen ) return;
 
-    //if( control is down)
-    //{ 
-    //    mTransform.setScale( mTransform.getScale() + increment );
-    //}
+    const float step = ( mThumbnailSize + THUMBNAIL_SPACING ) * mTransform.getScale();
+    const float pageStep = static_cast<float>( ci::app::getWindowHeight() );
 
-    mTransform.mouseWheel( pos, increment );
+    switch( event.getCode() )
+    {
+        case ci::app::KeyEvent::KEY_UP:
+            mTransform.pan( ci::vec2( 0.0f,  step ) );
+            break;
+        case ci::app::KeyEvent::KEY_DOWN:
+            mTransform.pan( ci::vec2( 0.0f, -step ) );
+            break;
+        case ci::app::KeyEvent::KEY_LEFT:
+            mTransform.pan( ci::vec2(  step, 0.0f ) );
+            break;
+        case ci::app::KeyEvent::KEY_RIGHT:
+            mTransform.pan( ci::vec2( -step, 0.0f ) );
+            break;
+        case ci::app::KeyEvent::KEY_PAGEUP:
+            mTransform.pan( ci::vec2( 0.0f,  pageStep ) );
+            break;
+        case ci::app::KeyEvent::KEY_PAGEDOWN:
+            mTransform.pan( ci::vec2( 0.0f, -pageStep ) );
+            break;
+        case ci::app::KeyEvent::KEY_RETURN:
+        case ci::app::KeyEvent::KEY_KP_ENTER:
+            selectActive();
+            break;
+        default:
+            break;
+    }
 }
 
 void GalleryView::selectVideo(int index)

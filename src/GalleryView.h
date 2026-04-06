@@ -52,7 +52,8 @@ public:
     void mouseDown( const ci::ivec2& pos );
     void mouseDrag( const ci::ivec2 &pos );
     void mouseMove( const ci::ivec2& pos );
-    void mouseWheel( const ci::ivec2& pos, float increment );
+    void mouseWheel( const ci::ivec2& pos, float increment, bool ctrlDown = false );
+    void keyDown( const ci::app::KeyEvent& event );
 
     // Controller navigation: move active video by delta column/row in the grid
     void navigateActive( int dc, int dr );
@@ -70,10 +71,11 @@ private:
     void loadThumbnail(VideoItem& item);
     void calculateThumbnailRects();
     void updateHoverState(const ci::ivec2& mousePos);
-    void setActiveIndex(int index);
+    void setActiveIndex(int index, bool centerView = false);
     void selectVideo(int index);
     void navigateToDirectory(const std::string& dirPath);
-    
+    void fitToWindow(const ci::ivec2& windowSize);
+
     static ci::Rectf getCenteredRect( const ci::Rectf &r, const ci::vec2 &size );
 
 #ifdef CINDER_MSW
@@ -88,10 +90,11 @@ private:
     std::vector<std::string> mSubdirectories;
     ViewportTransform mTransform;
 
-    static constexpr float THUMBNAIL_SIZE = 180.0f;
-    static constexpr float THUMBNAIL_SPACING = 20.0f;
-    static constexpr int THUMBNAILS_PER_ROW = 5;
+    static constexpr float THUMBNAIL_SPACING = 10.0f;
     static constexpr float GALLERY_TOP_MARGIN = 100.0f;
+
+    float mThumbnailSize{ 180.0f };
+    int mThumbnailsPerRow{ 5 };
     static constexpr float HOVER_SCALE = 1.33f;
     static constexpr float ANIM_DURATION = 0.5f;
 
